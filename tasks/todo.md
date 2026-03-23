@@ -22,7 +22,7 @@
 - [x] Add unit tests for parser, crop simulation, reward aggregation, and edge cases.
 - [x] Rewrite `README.md` with an intuitive setup guide, design rationale, findings, skeptical analysis, and next experiments.
 - [x] Verify the scaffold with local tests and shell validation.
-- [ ] Set the GitHub remote, commit changes, and push to `https://github.com/sabdulmajid/Active-Perception-R1.git`.
+- [x] Set the GitHub remote, commit changes, and push to `https://github.com/sabdulmajid/Active-Perception-R1.git`.
 
 ## Architecture Notes
 
@@ -37,3 +37,20 @@
 - Verified launcher syntax with `bash -n scripts/train_grpo_active_vision.sh`.
 - Verified environment limitation: `torch`, `verl`, and `vllm` are not installed in this workspace yet, so no end-to-end GRPO training run was executed locally.
 - Research conclusion: the strongest first milestone is a verifiable crop-selection setup with dense process rewards, not a claim of fully solved general active perception.
+
+## Self-Driving Extension
+
+- [x] Audit the untracked self-driving reward, simulator, scripts, and results to reconstruct the intended experiment.
+- [x] Fix correctness issues in the synthetic policy sweep before trusting the checked-in metrics.
+- [x] Add automated coverage for self-driving rewards, safety penalties, and synthetic report generation.
+- [x] Regenerate the synthetic sweep artifacts with the corrected default configuration.
+- [x] Update `README.md` to document the self-driving extension, verification commands, and honest limitations.
+- [x] Commit changes and push `main` to `origin`.
+
+## Self-Driving Review Notes
+
+- Fixed a cross-seed scene-ID collision in `src/active_perception_r1/sim/self_driving_lab.py` that previously distorted selection-rate and pairwise-preference metrics by grouping different seeded scenes together.
+- Verified `bash -n scripts/train_grpo_self_driving.sh`.
+- Verified `PYTHONPATH=src python3 -m unittest discover -s tests -v`: `12/12` tests passed after adding self-driving coverage.
+- Verified `PYTHONPATH=src python3 scripts/run_self_driving_policy_sweep.py` with the default configuration, producing `9,000` scene instances and `54,000` policy rollouts.
+- Refreshed `results/self_driving_policy_sweep.json` and `results/self_driving_policy_sweep.md` from the corrected pipeline.
