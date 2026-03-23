@@ -14,4 +14,7 @@ checkpoints/
 data/
 .vendor/
 .pip-cache/
+.vendor_train/
+.tmp/
+reports/grpo_smoke_run*.log
 

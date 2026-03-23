@@ -19,6 +19,7 @@ from active_perception_r1.rewards.active_vision_reward import (
     extract_final_answer,
     normalize_answer,
 )
+from active_perception_r1.sim.live_reinjection import run_live_reinjection_episode
 from active_perception_r1.utils.trace_parser import parse_reasoning_trace
 
 
@@ -201,19 +202,15 @@ def run_example(
         "<zoom_roi x0=\"...\" y0=\"...\" x1=\"...\" y1=\"...\" /> using normalized coordinates, then answer "
         "as <answer>...</answer>."
     )
-    active_pass_1 = model.generate([image], active_prompt_1)
-    dynamic_crop = crop_from_zoom_trace(image, active_pass_1)
-
-    if dynamic_crop is None:
-        active_final_response = active_pass_1
-        used_crop = False
-    else:
-        active_prompt_2 = (
-            "You now have the original image and a zoomed crop. Use the crop to verify the value. "
-            "Answer only as <answer>...</answer>."
-        )
-        active_final_response = model.generate([image, dynamic_crop], active_prompt_2)
-        used_crop = True
+    live_result = run_live_reinjection_episode(
+        image=image,
+        task_text=active_prompt_1,
+        generator=model.generate,
+        max_steps=3,
+    )
+    active_pass_1 = live_result.steps[0].response if live_result.steps else ""
+    active_final_response = live_result.final_response
+    used_crop = live_result.used_zoom_count > 0
 
     gt_norm = normalize_answer(example.ground_truth)
     baseline_pred = parse_int_answer(baseline_response)
@@ -238,6 +235,7 @@ def run_example(
         "oracle_response": oracle_response,
         "active_pass_1": active_pass_1,
         "active_final_response": active_final_response,
+        "active_steps": len(live_result.steps),
         "baseline_pred": str(baseline_pred),
         "oracle_pred": str(oracle_pred),
         "active_pred": str(active_pred),

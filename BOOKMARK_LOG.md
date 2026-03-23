@@ -75,3 +75,29 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
   - `HF_HOME=/pub7/neel2/.hf_home`
   - `HUGGINGFACE_HUB_CACHE=/pub7/neel2/.cache_hf`
   - `HF_HUB_DISABLE_XET=1`
+
+## 2026-03-23 — Session: Live reinjection + final cleanup
+
+### What was implemented
+- Added a real iterative live-reinjection loop:
+  - `src/active_perception_r1/sim/live_reinjection.py`
+  - `src/active_perception_r1/sim/__init__.py`
+- Benchmark runner now executes active mode via live reinjection:
+  - `scripts/benchmark_active_vision.py`
+- Added tests for reinjection behavior:
+  - `tests/test_live_reinjection.py`
+- Hardened launcher knobs for practical workstation execution:
+  - `scripts/train_grpo_active_vision.sh`
+
+### Validation
+- `PYTHONPATH=src python3 -m unittest discover -s tests -v` => `11/11` passing.
+
+### Artifact curation
+- Added benchmark runs from additional n=24 sweeps under `reports/active_benchmark/`.
+- Updated `reports/smoke-2026-03-23.md` with multi-run summary.
+- Added ignore rules for runtime trash:
+  - `.vendor_train/`, `.tmp/`, `reports/grpo_smoke_run*.log`.
+
+### Next agent note
+- Core active-perception loop + measurable benchmarking are now implemented and committed.
+- Remaining improvements are quality/performance work (e.g., better tool-use alignment), not missing project skeleton.

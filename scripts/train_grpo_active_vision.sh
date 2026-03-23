@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 export PYTHONPATH="${REPO_ROOT}/src:${PYTHONPATH:-}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
+export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 
 ENGINE="${ENGINE:-vllm}"
 MODEL_PATH="${MODEL_PATH:-Qwen/Qwen2.5-VL-7B-Instruct}"
@@ -22,13 +23,17 @@ VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-16}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-2048}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-1536}"
 N_RESPONSES="${N_RESPONSES:-4}"
+IMAGE_KEY="${IMAGE_KEY-images}"
 PPO_MINI_BATCH_SIZE="${PPO_MINI_BATCH_SIZE:-32}"
+PPO_MICRO_BATCH_SIZE_PER_GPU="${PPO_MICRO_BATCH_SIZE_PER_GPU:-1}"
 ACTOR_MAX_TOKEN_LEN_PER_GPU="${ACTOR_MAX_TOKEN_LEN_PER_GPU:-8192}"
 LOGPROB_MAX_TOKEN_LEN_PER_GPU="${LOGPROB_MAX_TOKEN_LEN_PER_GPU:-12288}"
 ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.55}"
 ROLLOUT_TP_SIZE="${ROLLOUT_TP_SIZE:-1}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-4096}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-8}"
+N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-2}"
+N_NODES="${N_NODES:-1}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-5}"
 SAVE_FREQ="${SAVE_FREQ:-10}"
 TEST_FREQ="${TEST_FREQ:-10}"
@@ -37,6 +42,7 @@ PROCESS_REWARD_SCALE="${PROCESS_REWARD_SCALE:-0.35}"
 MAX_ZOOM_CALLS="${MAX_ZOOM_CALLS:-3}"
 MIN_RELATIVE_AREA="${MIN_RELATIVE_AREA:-0.02}"
 MAX_RELATIVE_AREA="${MAX_RELATIVE_AREA:-0.65}"
+ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-sdpa}"
 
 if [[ -n "${WANDB_API_KEY:-}" ]]; then
   LOGGER='["console","wandb"]'
@@ -60,8 +66,9 @@ python3 -m verl.trainer.main_ppo \
   data.max_response_length="${MAX_RESPONSE_LENGTH}" \
   data.filter_overlong_prompts=True \
   data.truncation=error \
-  data.image_key=images \
+  ${IMAGE_KEY:+data.image_key="${IMAGE_KEY}"} \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
+  +actor_rollout_ref.model.override_config.attn_implementation="${ATTN_IMPLEMENTATION}" \
   actor_rollout_ref.model.use_remove_padding=True \
   actor_rollout_ref.model.use_fused_kernels=True \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
@@ -69,6 +76,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
   actor_rollout_ref.actor.optim.weight_decay=0.05 \
   actor_rollout_ref.actor.ppo_mini_batch_size="${PPO_MINI_BATCH_SIZE}" \
+  actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu="${PPO_MICRO_BATCH_SIZE_PER_GPU}" \
   actor_rollout_ref.actor.loss_agg_mode=token-mean \
   actor_rollout_ref.actor.grad_clip=1.0 \
   actor_rollout_ref.actor.entropy_coeff=0 \
@@ -104,8 +112,8 @@ python3 -m verl.trainer.main_ppo \
   trainer.project_name="${PROJECT_NAME}" \
   trainer.experiment_name="${EXPERIMENT_NAME}" \
   trainer.default_local_dir="${CHECKPOINT_DIR}" \
-  trainer.n_gpus_per_node=2 \
-  trainer.nnodes=1 \
+  trainer.n_gpus_per_node="${N_GPUS_PER_NODE}" \
+  trainer.nnodes="${N_NODES}" \
   trainer.val_before_train=True \
   trainer.critic_warmup=0 \
   trainer.save_freq="${SAVE_FREQ}" \

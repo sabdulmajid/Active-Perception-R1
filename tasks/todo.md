@@ -16,7 +16,15 @@
 - [x] Execute benchmark protocol with `full_image`, `oracle_crop`, and `active_two_pass` on `HuggingFaceTB/SmolVLM-256M-Instruct` (`n=24`).
 - [x] Execute benchmark protocol with `full_image`, `oracle_crop`, and `active_two_pass` on `HuggingFaceTB/SmolVLM-500M-Instruct` (`n=24`).
 - [x] Write reproducible benchmark summary to `reports/smoke-2026-03-23.md`.
-- [ ] Commit and push benchmarking artifacts.
+- [x] Commit and push benchmarking artifacts.
+
+## Continuation — 2026-03-23 (Live Reinjection Finalization)
+
+- [x] Implement iterative live image reinjection loop in `src/active_perception_r1/sim/live_reinjection.py`.
+- [x] Integrate benchmark active mode with live reinjection (`scripts/benchmark_active_vision.py`).
+- [x] Add live reinjection unit tests (`tests/test_live_reinjection.py`).
+- [x] Re-run full unit suite (`11/11`).
+- [ ] Commit and push curated implementation + artifact updates.
 
 ## Objectives
 
@@ -78,3 +86,10 @@
 	- active two-pass `0.5417`
 	- active crop usage `0.0417`
 - Net finding: current prompt-only active loop underperforms baseline on both tested models, while oracle crops show clear headroom for better perception policy.
+
+## Review Notes — Live Reinjection 2026-03-23
+
+- Added `run_live_reinjection_episode` to support iterative zoom->crop->reinject behavior.
+- Benchmark active branch now uses the live reinjection episode API instead of a fixed two-step shim.
+- Added tests validating both successful reinjection and early-stop behavior.
+- Validation status: `PYTHONPATH=src python3 -m unittest discover -s tests -v` passes `11/11` tests.
