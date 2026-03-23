@@ -34,3 +34,44 @@ cd /pub7/neel2/active-perception
 git status
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
+
+## 2026-03-23 — Session: Actual model benchmarking (smoke)
+
+### What was added
+- New runner: `scripts/benchmark_active_vision.py`
+  - Builds a synthetic inset-reading benchmark set
+  - Runs 3 protocols per sample:
+    - `full_image` baseline
+    - `oracle_crop` (upper bound on perception headroom)
+    - `active_two_pass` (model emits optional `<zoom_roi .../>`, then second pass with crop)
+  - Writes machine-readable + markdown reports into `reports/active_benchmark/`
+
+### Actual model impact (n=24 each)
+- `HuggingFaceTB/SmolVLM-256M-Instruct`
+  - baseline: `0.8750`
+  - oracle_crop: `1.0000` (delta `+0.1250`)
+  - active_two_pass: `0.5000` (delta `-0.3750`)
+  - active crop usage: `0.0000`
+- `HuggingFaceTB/SmolVLM-500M-Instruct`
+  - baseline: `0.8333`
+  - oracle_crop: `1.0000` (delta `+0.1667`)
+  - active_two_pass: `0.5417` (delta `-0.2917`)
+  - active crop usage: `0.0417`
+
+### Interpretation
+- There is measurable upside from better perception policy (`oracle_crop > baseline`).
+- Current prompt-only active loop is not enough for these small models; they rarely emit valid zoom actions.
+- This is now measured, not assumed.
+
+### Artifacts to inspect
+- `reports/smoke-2026-03-23.md`
+- `reports/active_benchmark/benchmark-20260323-110341.{json,md}`
+- `reports/active_benchmark/benchmark-20260323-110530.{json,md}`
+
+### Runtime notes
+- Global env on `/pub3` is disk-full; local deps were installed under `.vendor`.
+- Use these env vars for reruns:
+  - `PYTHONPATH=/pub7/neel2/active-perception/src:/pub7/neel2/active-perception/.vendor`
+  - `HF_HOME=/pub7/neel2/.hf_home`
+  - `HUGGINGFACE_HUB_CACHE=/pub7/neel2/.cache_hf`
+  - `HF_HUB_DISABLE_XET=1`

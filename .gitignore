@@ -12,4 +12,6 @@ wandb/
 outputs/
 checkpoints/
 data/
+.vendor/
+.pip-cache/
 

@@ -33,11 +33,33 @@ Verified in this workspace on `March 23, 2026`:
 
 - `nvidia-smi` confirms `2 x NVIDIA RTX Pro 6000 Blackwell` with about `97,887 MiB` VRAM each, idle and available.
 - `bash -n scripts/train_grpo_active_vision.sh` passes.
-- `PYTHONPATH=src python3 -m unittest discover -s tests -v` passes `7/7` tests.
+- `PYTHONPATH=src python3 -m unittest discover -s tests -v` passes `9/9` tests.
 - A sample reward probe returns:
   - `score=1.3595`
   - `visual_perception_reward=0.3595`
   - `best_region_coverage=0.9272`
+
+## Benchmark Snapshot (Actual Models)
+
+The repository now includes a real benchmark runner at `scripts/benchmark_active_vision.py` and smoke results in `reports/active_benchmark/`.
+
+Aligned runs at `n=24` samples each (`March 23, 2026`):
+
+- `HuggingFaceTB/SmolVLM-256M-Instruct`
+  - baseline full-image accuracy: `0.8750`
+  - oracle-crop accuracy: `1.0000`
+  - active two-pass accuracy: `0.5000`
+  - active crop usage rate: `0.0000`
+- `HuggingFaceTB/SmolVLM-500M-Instruct`
+  - baseline full-image accuracy: `0.8333`
+  - oracle-crop accuracy: `1.0000`
+  - active two-pass accuracy: `0.5417`
+  - active crop usage rate: `0.0417`
+
+Interpretation:
+
+- There is measurable headroom from better perception policy (`oracle_crop > baseline`).
+- Current prompt-only active loop is not sufficient yet for these models; explicit tool-use behavior needs alignment/training.
 
 That means the reward logic works as designed on synthetic metadata, but it does not mean we have already demonstrated a trained zoom policy on a real benchmark.
 

@@ -116,11 +116,16 @@ def make_synthetic_dataset(
 
 class VisionBenchModel:
     def __init__(self, model_id: str, max_new_tokens: int) -> None:
-        from transformers import AutoModelForVision2Seq, AutoProcessor
+        from transformers import AutoProcessor
+
+        try:
+            from transformers import AutoModelForImageTextToText as AutoVisionModel
+        except ImportError:
+            from transformers import AutoModelForCausalLM as AutoVisionModel
 
         dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
         self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-        self.model = AutoModelForVision2Seq.from_pretrained(
+        self.model = AutoVisionModel.from_pretrained(
             model_id,
             trust_remote_code=True,
             torch_dtype=dtype,

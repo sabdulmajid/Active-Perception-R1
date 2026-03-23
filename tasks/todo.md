@@ -7,7 +7,16 @@
 - [x] Add regression tests for list payloads and scalar alias metadata.
 - [x] Re-run local unit tests after edits.
 - [x] Write a bookmark handoff log so work survives disconnects.
-- [ ] Commit and push latest hardening changes.
+- [x] Commit and push latest hardening changes.
+
+## Continuation — 2026-03-23 (Model Benchmarking)
+
+- [x] Install minimal local inference dependencies under project storage due `/pub3` disk saturation.
+- [x] Implement a real benchmarking script (`scripts/benchmark_active_vision.py`) that runs actual model inference.
+- [x] Execute benchmark protocol with `full_image`, `oracle_crop`, and `active_two_pass` on `HuggingFaceTB/SmolVLM-256M-Instruct` (`n=24`).
+- [x] Execute benchmark protocol with `full_image`, `oracle_crop`, and `active_two_pass` on `HuggingFaceTB/SmolVLM-500M-Instruct` (`n=24`).
+- [x] Write reproducible benchmark summary to `reports/smoke-2026-03-23.md`.
+- [ ] Commit and push benchmarking artifacts.
 
 ## Objectives
 
@@ -31,7 +40,7 @@
 - [x] Add unit tests for parser, crop simulation, reward aggregation, and edge cases.
 - [x] Rewrite `README.md` with an intuitive setup guide, design rationale, findings, skeptical analysis, and next experiments.
 - [x] Verify the scaffold with local tests and shell validation.
-- [ ] Set the GitHub remote, commit changes, and push to `https://github.com/sabdulmajid/Active-Perception-R1.git`.
+- [x] Set the GitHub remote, commit changes, and push to `https://github.com/sabdulmajid/Active-Perception-R1.git`.
 
 ## Architecture Notes
 
@@ -55,3 +64,17 @@
 	- list-shaped verl payload fields path
 	- scalar `answer_aliases` path
 - Validation: `PYTHONPATH=src python3 -m unittest discover -s tests -v` now passes `9/9` tests.
+
+## Review Notes — Benchmarking 2026-03-23
+
+- `reports/active_benchmark/benchmark-20260323-110341.md` (`SmolVLM-256M`, `n=24`):
+	- baseline `0.8750`
+	- oracle crop `1.0000`
+	- active two-pass `0.5000`
+	- active crop usage `0.0000`
+- `reports/active_benchmark/benchmark-20260323-110530.md` (`SmolVLM-500M`, `n=24`):
+	- baseline `0.8333`
+	- oracle crop `1.0000`
+	- active two-pass `0.5417`
+	- active crop usage `0.0417`
+- Net finding: current prompt-only active loop underperforms baseline on both tested models, while oracle crops show clear headroom for better perception policy.
