@@ -1,208 +1,121 @@
 # Active-Perception-R1
 
-Active-Perception-R1 is an open-source research scaffold for training VLMs to actively gather visual evidence before answering. The core idea is simple: instead of treating perception as a one-shot image encoding problem, we train a model to emit visual tool calls like `<zoom_roi ... />` inside its `<think>` trace, then reward it for choosing crops that actually cover task-relevant evidence.
+Train VLMs to **look before they answer**.
 
-This repository is built around `verl` and targets a dual-GPU workstation with `2 x NVIDIA RTX Pro 6000` cards. As of `March 23, 2026`, the repo contains a tested custom reward module, a verl launch script tuned for this hardware class, a sample task schema, and a research write-up that is intentionally skeptical about what is solved versus what still requires custom work.
+`Active-Perception-R1` is a research project for multimodal RL where the model is rewarded not only for the final answer, but also for *how it inspects the image* (e.g., `<zoom_roi .../>` in `<think>`).
 
-## Current Status
+## Why this project exists
 
-What is implemented now:
+Most VLM pipelines still treat perception as one-shot encoding. That fails on tasks where evidence is tiny (insets, labels, OCR regions).
 
-- A clean Python package under `src/active_perception_r1/`.
-- `scripts/train_grpo_active_vision.sh` for multimodal GRPO with the requested memory knobs:
-  - `actor_rollout_ref.model.use_remove_padding=True`
-  - dynamic batch sizing for actor, ref log-prob, and rollout log-prob
-  - `actor_rollout_ref.ref.fsdp_config.param_offload=True`
-  - `+actor_rollout_ref.rollout.engine_kwargs.vllm.disable_mm_preprocessor_cache=True`
-- A custom verl reward function that:
-  - parses `<think>` traces for `<zoom_roi>` tags
-  - validates ROIs
-  - simulates a crop from task metadata
-  - appends a structured `<image_crop ... />` token to an augmented context string
-  - combines outcome reward with a visual perception/process reward
-- Unit tests covering parser behavior, malformed tags, targeted crops, and penalties.
+This project addresses that by combining:
 
-What is not implemented yet:
+- **Outcome reward**: final answer correctness
+- **Process reward**: whether zoom/crop actions were valid and evidence-aligned
 
-- True online mid-generation image reinjection into the live rollout stream. Current stable verl GRPO examples are still one-turn rollouts; this repo simulates crop observations inside the reward path first, which is the safer research starting point.
-- An end-to-end local training run in this workspace. The machine has the GPUs, but `torch`, `verl`, and `vllm` are not installed here yet, so the launch path has been validated at the shell/config level rather than by a full GRPO job.
+## What this project does today
 
-## Local Verification
+- Ships a custom active-perception reward: [src/active_perception_r1/rewards/active_vision_reward.py](src/active_perception_r1/rewards/active_vision_reward.py)
+- Parses and validates `<zoom_roi .../>` traces: [src/active_perception_r1/utils/trace_parser.py](src/active_perception_r1/utils/trace_parser.py)
+- Simulates evidence-bearing crop observations: [src/active_perception_r1/envs/zoom_simulator.py](src/active_perception_r1/envs/zoom_simulator.py)
+- Includes benchmark runner with real model inference: [scripts/benchmark_active_vision.py](scripts/benchmark_active_vision.py)
+- Includes GRPO launcher tuned for 2x RTX Pro 6000: [scripts/train_grpo_active_vision.sh](scripts/train_grpo_active_vision.sh)
 
-Verified in this workspace on `March 23, 2026`:
+## What results you can trust (real runs)
 
-- `nvidia-smi` confirms `2 x NVIDIA RTX Pro 6000 Blackwell` with about `97,887 MiB` VRAM each, idle and available.
-- `bash -n scripts/train_grpo_active_vision.sh` passes.
-- `PYTHONPATH=src python3 -m unittest discover -s tests -v` passes `9/9` tests.
-- A sample reward probe returns:
-  - `score=1.3595`
-  - `visual_perception_reward=0.3595`
-  - `best_region_coverage=0.9272`
+These are actual benchmark artifacts in [reports/active_benchmark](reports/active_benchmark).
 
-## Benchmark Snapshot (Actual Models)
+### Multi-run summary (n=24 per run, 3 runs/model)
 
-The repository now includes a real benchmark runner at `scripts/benchmark_active_vision.py` and smoke results in `reports/active_benchmark/`.
+| Model | Baseline Acc (mean) | Oracle Crop Acc (mean) | Active Two-Pass Acc (mean) | Active Crop Usage (mean) | Active - Baseline |
+|---|---:|---:|---:|---:|---:|
+| SmolVLM-256M | 0.9167 | 1.0000 | 0.5556 | 0.0000 | -0.3611 |
+| SmolVLM-500M | 0.9306 | 1.0000 | 0.4306 | 0.0417 | -0.5000 |
 
-Aligned runs at `n=24` samples each (`March 23, 2026`):
+### Interpretation (plain English)
 
-- `HuggingFaceTB/SmolVLM-256M-Instruct`
-  - baseline full-image accuracy: `0.8750`
-  - oracle-crop accuracy: `1.0000`
-  - active two-pass accuracy: `0.5000`
-  - active crop usage rate: `0.0000`
-- `HuggingFaceTB/SmolVLM-500M-Instruct`
-  - baseline full-image accuracy: `0.8333`
-  - oracle-crop accuracy: `1.0000`
-  - active two-pass accuracy: `0.5417`
-  - active crop usage rate: `0.0417`
+- **Oracle crops always help** (`1.0`): perception headroom is real.
+- **Prompt-only active loop underperforms** today: small models rarely emit valid zoom actions.
+- This repo gives you a **measurable bottleneck** (tool-use alignment), not hand-wavy claims.
 
-Interpretation:
+Reference report: [reports/smoke-2026-03-23.md](reports/smoke-2026-03-23.md)
 
-- There is measurable headroom from better perception policy (`oracle_crop > baseline`).
-- Current prompt-only active loop is not sufficient yet for these models; explicit tool-use behavior needs alignment/training.
+## Why someone would choose this
 
-That means the reward logic works as designed on synthetic metadata, but it does not mean we have already demonstrated a trained zoom policy on a real benchmark.
+Choose this project if you want to:
 
-## Research Findings
+- Build **verifiable** active-perception RL for VLMs (not generic chat tuning)
+- Debug *why* a model failed visually (bad/no zoom) instead of only seeing final accuracy
+- Run a practical workstation setup with reproducible scripts and artifacts
+- Start from a scaffold that is honest about current limits and easy to extend
 
-### What the literature strongly supports
+## Example: what “active perception” means
 
-- Explicit visual search helps when evidence is small, dense, high-resolution, or easy to miss. Good anchors here are [V* / SEAL](https://arxiv.org/abs/2312.14135), [CogCoM](https://arxiv.org/abs/2402.04236), [Chain-of-Focus](https://arxiv.org/abs/2505.15436), and [OpenThinkIMG](https://arxiv.org/abs/2505.08617).
-- Many multimodal reasoning failures are partly perception failures, not purely reasoning failures. The strongest evidence comes from [ActiView](https://arxiv.org/abs/2410.04659), [MLLMs Know Where to Look](https://arxiv.org/abs/2502.17422), and [Math Blind / MATHGLANCE](https://arxiv.org/abs/2503.20745).
-- RL can help when the reward is verifiable and local. The most relevant examples are [Active-O3](https://arxiv.org/abs/2505.21457), [ViCrit](https://arxiv.org/abs/2506.10128), and [GeoEyes](https://arxiv.org/abs/2602.14201).
+Model trace pattern:
 
-### What is not well supported yet
+```xml
+<think>
+I need to inspect the tiny inset.
+<zoom_roi x0="0.68" y0="0.05" x1="0.95" y1="0.30" />
+Now I can read the value.
+</think>
+<answer>42</answer>
+```
 
-- General claims that crop/zoom RL alone solves multimodal reasoning. Most strong results are narrow-domain, warm-started, or use dense geometric supervision.
-- Final-answer-only reward as the whole learning signal. The better papers use box rewards, grounding signals, verifier loops, or proxy tasks.
-- Claims that tool-calling behavior stays healthy automatically. [GeoEyes](https://arxiv.org/abs/2602.14201) explicitly warns about tool-usage homogenization and collapse.
+Reward signal behavior:
 
-### Design consequences for this repo
+- Correct answer + targeted zoom over relevant region ⇒ higher score
+- Correct answer but no zoom on zoom-required task ⇒ penalized process reward
+- Random/tiny/invalid zoom ⇒ penalized process reward
 
-- Start with verifiable perception-heavy tasks, not open-ended free-form VQA.
-- Keep the action space minimal: `zoom/crop`, `stop`, and optionally `ocr` later.
-- Preserve global context and append local evidence rather than replacing the whole view.
-- Compare against strong non-RL baselines like [Zoom-Refine](https://arxiv.org/abs/2506.01663) and [MLLMs Know Where to Look](https://arxiv.org/abs/2502.17422), not just against naive full-image inference.
-- Treat true self-verification loops as stage 2, after evidence selection is working.
+## Quick start
 
-## Upstream `verl` Findings
+### 1) Validate core logic
 
-As of `March 23, 2026`, upstream `verl` does directly support multimodal GRPO examples for Qwen-family VLMs, including [Qwen2.5-VL](https://github.com/volcengine/verl/blob/main/examples/grpo_trainer/run_qwen2_5_vl-7b.sh), plus other newer VLM examples in the repo. That is the main reason this project is based on `verl` instead of a custom PPO loop.
+```bash
+cd /pub7/neel2/active-perception
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
 
-Two caveats matter:
+### 2) Run real model benchmark
 
-- Official documentation is a little stale in places. The repo examples are more current than some doc pages.
-- The exact vLLM multimodal cache flag is version-sensitive. Upstream `verl` examples still use `disable_mm_preprocessor_cache=True`, while newer vLLM sources document the same behavior through `mm_processor_cache_gb=0`. This repo keeps the official `verl` knob in the launcher because that is what current verl VLM examples still use.
+```bash
+cd /pub7/neel2/active-perception
+PYTHONPATH=src:.vendor HF_HOME=/pub7/neel2/.hf_home HUGGINGFACE_HUB_CACHE=/pub7/neel2/.cache_hf HF_HUB_DISABLE_XET=1 \
+python3 scripts/benchmark_active_vision.py --samples 24 --model-id HuggingFaceTB/SmolVLM-500M-Instruct --output-dir reports/active_benchmark
+```
 
-## Repository Layout
+### 3) Run GRPO launcher
+
+```bash
+cd /pub7/neel2/active-perception
+MODEL_PATH=Qwen/Qwen2.5-VL-3B-Instruct N_RESPONSES=2 TRAIN_BATCH_SIZE=8 VAL_BATCH_SIZE=8 \
+./scripts/train_grpo_active_vision.sh
+```
+
+## Repository structure
 
 ```text
-.
-├── configs/
-│   └── active_vision_sample_task.json
-├── scripts/
-│   └── train_grpo_active_vision.sh
-├── src/active_perception_r1/
-│   ├── envs/zoom_simulator.py
-│   ├── rewards/active_vision_reward.py
-│   └── utils/trace_parser.py
-├── tasks/
-│   └── todo.md
-└── tests/
-    └── test_active_vision_reward.py
+configs/           sample task schema
+scripts/           training + benchmark runners
+src/               reward, parser, simulator implementations
+tests/             unit tests for reward/parser behavior
+reports/           benchmark outputs and smoke summaries
 ```
 
-## Reward Design
+## Current status and next milestone
 
-The reward function expects examples to carry task metadata in `extra_info`, especially:
+Current status:
 
-- `image_size`
-- `relevant_regions`
-- `requires_zoom`
-- optional `answer_aliases`
+- Reward + parser + simulator implemented and tested
+- Real benchmark harness implemented and producing reproducible reports
+- Core finding established: perception headroom exists; zoom policy is the bottleneck
 
-The scoring recipe is:
+Next milestone:
 
-1. Parse the model output for `<zoom_roi ... />` calls inside `<think>`.
-2. Reject malformed or nonsensical ROIs.
-3. Simulate each crop against the provided relevant regions.
-4. Append structured evidence tokens such as `<image_crop ... />` into an augmented context string.
-5. Combine:
-   - binary outcome reward from the final answer
-   - dense process reward from valid, bounded, relevant zoom behavior
+- Improve tool-use alignment (supervised warm-start + stricter format control)
+- Re-run same benchmark protocol and show positive `active_minus_baseline`
 
-The current implementation is intentionally metadata-driven. That keeps the first research loop reproducible and verifiable before we add live image mutation inside rollout.
+## Project intent
 
-## Sample Task Schema
-
-See [`configs/active_vision_sample_task.json`](/pub7/neel2/active-perception/configs/active_vision_sample_task.json). The important idea is that each example should include:
-
-- a multimodal `prompt`
-- `ground_truth`
-- `data_source`
-- `images`
-- `extra_info.relevant_regions`
-
-For research datasets, those relevant regions can come from:
-
-- chart cell or legend boxes
-- OCR spans
-- diagram anchor boxes
-- detection annotations
-- synthetic crop labels generated from a teacher model or heuristic program
-
-## Training Launcher
-
-The main launcher is [`scripts/train_grpo_active_vision.sh`](/pub7/neel2/active-perception/scripts/train_grpo_active_vision.sh).
-
-Example:
-
-```bash
-MODEL_PATH=Qwen/Qwen2.5-VL-7B-Instruct \
-TRAIN_FILE=/path/to/train.parquet \
-VAL_FILE=/path/to/val.parquet \
-./scripts/train_grpo_active_vision.sh
-```
-
-Safer first smoke test on this hardware:
-
-```bash
-MODEL_PATH=Qwen/Qwen2.5-VL-3B-Instruct \
-N_RESPONSES=2 \
-TRAIN_BATCH_SIZE=8 \
-VAL_BATCH_SIZE=8 \
-./scripts/train_grpo_active_vision.sh
-```
-
-Why the defaults look conservative:
-
-- `ROLLOUT_TP_SIZE=1` is a workstation-oriented choice so rollout does not automatically lock both GPUs into one tensor-parallel shard.
-- reference-model offload is enabled by default
-- dynamic batch sizing is enabled for the expensive token-length-sensitive paths
-- `use_remove_padding=True` is enabled for long `<think>` traces
-
-## Recommended First Experiments
-
-1. Chart or OCR-heavy tasks with verifiable local evidence.
-2. Compare four baselines:
-   - full image only
-   - training-free crop/refine
-   - supervised tool traces
-   - GRPO active perception
-3. Track failure modes explicitly:
-   - repeated center crops
-   - over-zooming
-   - no-stop behavior
-   - correct answer without relevant evidence
-   - relevant crop without answer improvement
-
-## Honest Next Step
-
-The next serious milestone is not “train the biggest model immediately.” It is:
-
-1. install `torch`, `verl`, and `vllm`
-2. run a 3B smoke experiment on a narrow verifiable benchmark
-3. benchmark against non-RL crop baselines
-4. only then scale to 7B or Kimi variants
-
-That keeps the project scientifically honest and avoids mistaking infrastructure complexity for research progress.
+This repository is designed to be a **credible MLE research scaffold**: clear hypothesis, measurable protocol, explicit failure modes, reproducible artifacts, and no inflated claims.
