@@ -40,6 +40,26 @@ These are actual benchmark artifacts in [reports/active_benchmark](reports/activ
 
 Reference report: [reports/smoke-2026-03-23.md](reports/smoke-2026-03-23.md)
 
+## Latest perf iteration (simple before/after)
+
+Intervention: `strict_zoom` active strategy in [scripts/benchmark_active_vision.py](scripts/benchmark_active_vision.py)
+
+- What changed: force a valid `<zoom_roi .../>` action first, then answer with reinjected crop evidence.
+- Evaluation: same model (`SmolVLM-500M`), same protocol, matched seeds (`31`, `37`), `n=24` each.
+
+| Metric | Before (`default`) | After (`strict_zoom`) | Delta |
+|---|---:|---:|---:|
+| Active accuracy | 0.3958 | 0.9583 | +0.5625 |
+| Active crop usage | 0.0208 | 0.3958 | +0.3750 |
+| Active - Baseline | -0.5417 | +0.0208 | +0.5625 |
+
+Artifacts:
+
+- [reports/active_benchmark/benchmark-20260323-221157.md](reports/active_benchmark/benchmark-20260323-221157.md)
+- [reports/active_benchmark/benchmark-20260323-221315.md](reports/active_benchmark/benchmark-20260323-221315.md)
+- [reports/active_benchmark/benchmark-20260323-221456.md](reports/active_benchmark/benchmark-20260323-221456.md)
+- [reports/active_benchmark/benchmark-20260323-221612.md](reports/active_benchmark/benchmark-20260323-221612.md)
+
 ## Why someone would choose this
 
 Choose this project if you want to:

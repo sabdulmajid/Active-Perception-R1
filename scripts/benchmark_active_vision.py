@@ -181,22 +181,7 @@ def crop_from_zoom_trace(image: Image.Image, response: str) -> Image.Image | Non
     return crop_from_bbox(image, bbox_norm)
 
 
-def run_example(
-    model: VisionBenchModel,
-    example: BenchmarkExample,
-) -> dict[str, Any]:
-    image = Image.open(example.image_path).convert("RGB")
-
-    baseline_prompt = (
-        "Read the blue numeric value in the top-right inset and answer with only digits inside "
-        "<answer>...</answer>."
-    )
-    baseline_response = model.generate([image], baseline_prompt)
-
-    oracle_crop = crop_from_bbox(image, example.bbox_norm)
-    oracle_prompt = "Read the numeric value in this crop and answer only as <answer>...</answer>."
-    oracle_response = model.generate([oracle_crop], oracle_prompt)
-
+def _run_active_default(model: VisionBenchModel, image: Image.Image) -> tuple[str, str, bool, int]:
     active_prompt_1 = (
         "Think step by step. If you need to inspect details, output one tool tag in your think block as "
         "<zoom_roi x0=\"...\" y0=\"...\" x1=\"...\" y1=\"...\" /> using normalized coordinates, then answer "
@@ -211,6 +196,60 @@ def run_example(
     active_pass_1 = live_result.steps[0].response if live_result.steps else ""
     active_final_response = live_result.final_response
     used_crop = live_result.used_zoom_count > 0
+    return active_pass_1, active_final_response, used_crop, len(live_result.steps)
+
+
+def _run_active_strict_zoom(model: VisionBenchModel, image: Image.Image) -> tuple[str, str, bool, int]:
+    zoom_only_prompt = (
+        "Output ONLY one tag in this exact format and nothing else: "
+        "<zoom_roi x0=\"0.00\" y0=\"0.00\" x1=\"1.00\" y1=\"1.00\" />. "
+        "Choose the smallest region that likely contains the blue numeric value in the top-right inset."
+    )
+    zoom_response = model.generate([image], zoom_only_prompt)
+    dynamic_crop = crop_from_zoom_trace(image, zoom_response)
+
+    if dynamic_crop is None:
+        retry_prompt = (
+            "Your previous output was invalid. Return ONLY a valid zoom tag exactly like: "
+            "<zoom_roi x0=\"0.70\" y0=\"0.05\" x1=\"0.95\" y1=\"0.30\" />"
+        )
+        zoom_response = model.generate([image], retry_prompt)
+        dynamic_crop = crop_from_zoom_trace(image, zoom_response)
+
+    if dynamic_crop is None:
+        fallback_prompt = "Read the blue numeric value in the image and answer only as <answer>...</answer>."
+        final_response = model.generate([image], fallback_prompt)
+        return zoom_response, final_response, False, 1
+
+    answer_prompt = (
+        "You have the original image and a zoomed crop. Read the blue numeric value and answer only as "
+        "<answer>...</answer>."
+    )
+    final_response = model.generate([image, dynamic_crop], answer_prompt)
+    return zoom_response, final_response, True, 2
+
+
+def run_example(
+    model: VisionBenchModel,
+    example: BenchmarkExample,
+    active_strategy: str,
+) -> dict[str, Any]:
+    image = Image.open(example.image_path).convert("RGB")
+
+    baseline_prompt = (
+        "Read the blue numeric value in the top-right inset and answer with only digits inside "
+        "<answer>...</answer>."
+    )
+    baseline_response = model.generate([image], baseline_prompt)
+
+    oracle_crop = crop_from_bbox(image, example.bbox_norm)
+    oracle_prompt = "Read the numeric value in this crop and answer only as <answer>...</answer>."
+    oracle_response = model.generate([oracle_crop], oracle_prompt)
+
+    if active_strategy == "strict_zoom":
+        active_pass_1, active_final_response, used_crop, active_steps = _run_active_strict_zoom(model, image)
+    else:
+        active_pass_1, active_final_response, used_crop, active_steps = _run_active_default(model, image)
 
     gt_norm = normalize_answer(example.ground_truth)
     baseline_pred = parse_int_answer(baseline_response)
@@ -235,7 +274,8 @@ def run_example(
         "oracle_response": oracle_response,
         "active_pass_1": active_pass_1,
         "active_final_response": active_final_response,
-        "active_steps": len(live_result.steps),
+        "active_steps": active_steps,
+        "active_strategy": active_strategy,
         "baseline_pred": str(baseline_pred),
         "oracle_pred": str(oracle_pred),
         "active_pred": str(active_pred),
@@ -276,6 +316,7 @@ def write_markdown_report(path: Path, model_id: str, summary: dict[str, Any], du
         f"- timestamp_utc: `{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())}`",
         f"- duration_sec: `{duration_sec:.2f}`",
         f"- samples: `{summary['n']}`",
+        f"- active_strategy: `{summary['active_strategy']}`",
         "",
         "## Results",
         "",
@@ -299,6 +340,7 @@ def main() -> None:
     parser.add_argument("--max-new-tokens", type=int, default=96)
     parser.add_argument("--output-dir", default="reports/active_benchmark")
     parser.add_argument("--dataset-dir", default="data/benchmark_synth")
+    parser.add_argument("--active-strategy", choices=["default", "strict_zoom"], default="default")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -312,9 +354,10 @@ def main() -> None:
 
     rows: list[dict[str, Any]] = []
     for sample in dataset:
-        rows.append(run_example(model, sample))
+        rows.append(run_example(model, sample, active_strategy=args.active_strategy))
 
     summary = summarize(rows)
+    summary["active_strategy"] = args.active_strategy
     duration = time.time() - started
 
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())

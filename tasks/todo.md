@@ -93,3 +93,12 @@
 - Benchmark active branch now uses the live reinjection episode API instead of a fixed two-step shim.
 - Added tests validating both successful reinjection and early-stop behavior.
 - Validation status: `PYTHONPATH=src python3 -m unittest discover -s tests -v` passes `11/11` tests.
+
+## Review Notes — Perf Iteration 2026-03-23
+
+- Added benchmark A/B strategy switch (`default` vs `strict_zoom`) in `scripts/benchmark_active_vision.py`.
+- Matched-seed evaluation on `SmolVLM-500M` (`seeds 31/37`, `n=24` each) shows:
+	- active accuracy `0.3958 -> 0.9583`
+	- crop usage `0.0208 -> 0.3958`
+	- active-minus-baseline `-0.5417 -> +0.0208`
+- Added concise results report at `reports/perf-iteration-2026-03-23.md` and referenced in README.

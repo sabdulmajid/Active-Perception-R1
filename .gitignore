@@ -17,4 +17,5 @@ data/
 .vendor_train/
 .tmp/
 reports/grpo_smoke_run*.log
+reports/*seed*.log
 

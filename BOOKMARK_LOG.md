@@ -101,3 +101,25 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 ### Next agent note
 - Core active-perception loop + measurable benchmarking are now implemented and committed.
 - Remaining improvements are quality/performance work (e.g., better tool-use alignment), not missing project skeleton.
+
+## 2026-03-23 — Session: Real perf iteration (strict zoom strategy)
+
+### Goal
+- Improve active-mode performance in a measurable, simple-to-explain way.
+
+### Change implemented
+- Added `--active-strategy` in `scripts/benchmark_active_vision.py` with:
+  - `default`
+  - `strict_zoom` (force valid `<zoom_roi .../>` output before answer step)
+
+### Measured impact (SmolVLM-500M, matched seeds 31/37, n=24 each)
+- Active accuracy: `0.3958 -> 0.9583` (`+0.5625`)
+- Active crop usage: `0.0208 -> 0.3958` (`+0.3750`)
+- Active minus baseline: `-0.5417 -> +0.0208` (`+0.5625`)
+
+### Artifacts
+- `reports/perf-iteration-2026-03-23.md`
+- `reports/active_benchmark/benchmark-20260323-221157.{json,md}`
+- `reports/active_benchmark/benchmark-20260323-221315.{json,md}`
+- `reports/active_benchmark/benchmark-20260323-221456.{json,md}`
+- `reports/active_benchmark/benchmark-20260323-221612.{json,md}`
