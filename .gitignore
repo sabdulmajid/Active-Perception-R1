@@ -18,4 +18,7 @@ data/
 .tmp/
 reports/grpo_smoke_run*.log
 reports/*seed*.log
+reports/real_benchmark/*.log
+reports/real_benchmark/bg_test.txt
+reports/real_benchmark/test.log
 

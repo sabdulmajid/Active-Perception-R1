@@ -123,3 +123,42 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 - `reports/active_benchmark/benchmark-20260323-221315.{json,md}`
 - `reports/active_benchmark/benchmark-20260323-221456.{json,md}`
 - `reports/active_benchmark/benchmark-20260323-221612.{json,md}`
+
+## 2026-03-23 — Session: Real-data DocVQA expansion (multi-model)
+
+### Goal
+- Run real-dataset benchmarks on larger/more-used VLMs with clear, consolidated impact reporting.
+
+### What was implemented
+- Added `scripts/benchmark_docvqa_suite.py`:
+  - loads `nielsr/docvqa_1200_examples`
+  - evaluates baseline and active flows per model
+  - supports `default` vs `strict_zoom` strategy
+  - writes per-run JSON + markdown summaries
+- Fixed real-data parsing/scoring edge cases:
+  - DocVQA `query` field can be a language dict (handled)
+  - answer extraction now supports dict/list forms and alias-aware exact scoring
+
+### Confirmed completed real-data entries (10)
+- `HuggingFaceTB/SmolVLM-500M-Instruct` (`default`, `strict_zoom`)
+- `Qwen/Qwen2.5-VL-3B-Instruct` (`default`, `strict_zoom`)
+- `Qwen/Qwen2.5-VL-7B-Instruct` (`default`, `strict_zoom`)
+- `Qwen/Qwen2-VL-2B-Instruct` (`default`, `strict_zoom`)
+- `llava-hf/llava-1.5-7b-hf` (`default`, `strict_zoom`)
+
+### Consolidated report
+- Updated `reports/real_benchmark/leaderboard-2026-03-23.md` with a 10-entry table and aggregate deltas.
+- Canonical full-suite artifact: `reports/real_benchmark/docvqa-suite-20260323-230000.json`.
+- Key aggregate: mean `active_minus_baseline` improved from `-0.4000` (`default`) to `-0.0125` (`strict_zoom`).
+
+### Environment/runtime notes
+- Kept HF caches off saturated disk via `/pub7`:
+  - `HF_HOME=/pub7/neel2/.hf_home`
+  - `HUGGINGFACE_HUB_CACHE=/pub7/neel2/.cache_hf`
+  - `HF_DATASETS_CACHE=/pub7/neel2/.cache_hf_datasets`
+- Installed `datasets` locally into `.vendor` for this workspace.
+
+### Next actions
+1. Expand sample count beyond `n=16` for higher-confidence final ranking.
+2. Add one additional mainstream VLM checkpoint to extend breadth further.
+3. Keep reporting tied to canonical full-suite JSON artifacts for reproducibility.

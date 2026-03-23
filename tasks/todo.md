@@ -26,6 +26,15 @@
 - [x] Re-run full unit suite (`11/11`).
 - [ ] Commit and push curated implementation + artifact updates.
 
+## Continuation — 2026-03-23 (Real-Data DocVQA Expansion)
+
+- [x] Implement real-dataset benchmark harness (`scripts/benchmark_docvqa_suite.py`) for DocVQA model/strategy sweeps.
+- [x] Fix DocVQA schema parsing (`query`/`answer` dict handling) and alias-based exact-match scoring.
+- [x] Run real-data benchmark entries for 3 models across `default` and `strict_zoom` (6 total entries).
+- [x] Complete expanded 5-model sweep (`10` entries total) and refresh consolidated leaderboard.
+- [x] Publish consolidated leaderboard in `reports/real_benchmark/leaderboard-2026-03-23.md`.
+- [ ] Commit and push latest real-data benchmark + reporting updates.
+
 ## Objectives
 
 - [x] Review project guidance in `AGENTS.md`, `README.md`, and `BACKGROUND_RESEARCH.md`.
@@ -102,3 +111,10 @@
 	- crop usage `0.0208 -> 0.3958`
 	- active-minus-baseline `-0.5417 -> +0.0208`
 - Added concise results report at `reports/perf-iteration-2026-03-23.md` and referenced in README.
+
+## Review Notes — Real Data 2026-03-23
+
+- Added `scripts/benchmark_docvqa_suite.py` to run real DocVQA samples (`nielsr/docvqa_1200_examples`) with baseline vs active modes.
+- Corrected dataset field handling to use language/text dicts and alias-aware scoring to avoid false negatives.
+- Confirmed 10 real benchmark entries (5 models x 2 strategies), consolidated in `reports/real_benchmark/leaderboard-2026-03-23.md`.
+- Current aggregate finding: mean `active_minus_baseline` improved from `-0.4000` (`default`) to `-0.0125` (`strict_zoom`).

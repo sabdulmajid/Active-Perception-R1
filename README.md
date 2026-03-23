@@ -24,29 +24,31 @@ This project gives you a practical way to measure and improve that gap with:
 
 ## Proven impact (real runs)
 
-### Baseline multi-run snapshot (n=24, 3 runs/model)
+### Real dataset leaderboard (DocVQA)
 
-| Model | Baseline Acc | Oracle Crop Acc | Active Acc | Active Crop Usage | Active - Baseline |
-|---|---:|---:|---:|---:|---:|
-| SmolVLM-256M | 0.9167 | 1.0000 | 0.5556 | 0.0000 | -0.3611 |
-| SmolVLM-500M | 0.9306 | 1.0000 | 0.4306 | 0.0417 | -0.5000 |
+Expanded benchmark on `nielsr/docvqa_1200_examples` with **10 benchmark entries** (5 VLMs × 2 strategies):
 
-This established the core bottleneck clearly: **tool-use alignment**.
+| Model | Strategy | Baseline Acc | Active Acc | Active-Baseline |
+|---|---:|---:|---:|---:|
+| SmolVLM-500M | `default` | 0.6250 | 0.5625 | -0.0625 |
+| SmolVLM-500M | `strict_zoom` | 0.6250 | 0.6250 | +0.0000 |
+| Qwen2.5-VL-3B | `default` | 0.7500 | 0.1875 | -0.5625 |
+| Qwen2.5-VL-3B | `strict_zoom` | 0.7500 | 0.7500 | +0.0000 |
+| Qwen2.5-VL-7B | `default` | 0.9375 | 0.0000 | -0.9375 |
+| Qwen2.5-VL-7B | `strict_zoom` | 0.9375 | 0.9375 | +0.0000 |
+| Qwen2-VL-2B | `default` | 0.8750 | 0.6250 | -0.2500 |
+| Qwen2-VL-2B | `strict_zoom` | 0.8750 | 0.8750 | +0.0000 |
+| LLaVA-1.5-7B | `default` | 0.2500 | 0.0625 | -0.1875 |
+| LLaVA-1.5-7B | `strict_zoom` | 0.2500 | 0.1875 | -0.0625 |
 
-### Latest performance iteration (matched A/B)
+Impact summary:
 
-Intervention: strict zoom-action formatting in active mode.
-
-| Metric (SmolVLM-500M, seeds 31/37, n=24 each) | Before (`default`) | After (`strict_zoom`) | Delta |
-|---|---:|---:|---:|
-| Active accuracy | 0.3958 | 0.9583 | +0.5625 |
-| Active crop usage | 0.0208 | 0.3958 | +0.3750 |
-| Active - Baseline | -0.5417 | +0.0208 | +0.5625 |
-
-That is a concrete, measured improvement with a simple intervention.
+- Mean `active_minus_baseline` improved from `-0.4000` (`default`) to `-0.0125` (`strict_zoom`).
+- Mean active accuracy gain from `strict_zoom`: `+0.3875`.
 
 Reports:
 
+- [reports/real_benchmark/leaderboard-2026-03-23.md](reports/real_benchmark/leaderboard-2026-03-23.md)
 - [reports/perf-iteration-2026-03-23.md](reports/perf-iteration-2026-03-23.md)
 - [reports/smoke-2026-03-23.md](reports/smoke-2026-03-23.md)
 
