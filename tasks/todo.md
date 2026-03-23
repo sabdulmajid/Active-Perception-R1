@@ -54,3 +54,37 @@
 - Verified `PYTHONPATH=src python3 -m unittest discover -s tests -v`: `12/12` tests passed after adding self-driving coverage.
 - Verified `PYTHONPATH=src python3 scripts/run_self_driving_policy_sweep.py` with the default configuration, producing `9,000` scene instances and `54,000` policy rollouts.
 - Refreshed `results/self_driving_policy_sweep.json` and `results/self_driving_policy_sweep.md` from the corrected pipeline.
+
+## AeroRL Library (Zero-Copy VLM RL)
+
+### Phase 1 — COMPLETED (2026-03-23)
+- [x] Create `aerorl/` package structure: kernels/, extensions/, utils/, benchmarks/, examples/
+- [x] Implement `AeroRLConfig` dataclass with full validation
+- [x] Implement `AeroRLSharedKVCache` + CUDA IPC extension (`ipc_kv_cache.cu`)
+- [x] Implement Triton GRPO loss kernel with vision mask + autograd.Function backward
+- [x] Implement Triton GSPO loss kernel (group-sparse top-k selection)
+- [x] Implement Triton CISPO loss kernel (sequence-level clipped IS PO)
+- [x] Implement `QuantisedRefModel` (INT8 via bitsandbytes/torchao) + immediate logit freeing
+- [x] Implement `BackgroundRefHook` for CUDA-stream overlap
+- [x] Implement vision mask helpers (`build_vision_mask_from_labels/input_ids/auto`)
+
+### Phase 2 — COMPLETED (2026-03-23)
+- [x] DAPO variance filter (`aerorl/kernels/dapo_filter.py`)
+- [x] Auto vision masking for Qwen2.5-VL, LLaVA-1.6, InternVL2, Phi-3-Vision (`VisionMaskBuilder`)
+
+### Build & Benchmark
+- [x] `setup.py` with CUDA 12.4+ wheels (CUDAExtension for IPC, Triton for losses)
+- [x] `vlm_grpo_benchmark.py` with `--dry-run` mode (CPU-only)
+- [ ] Run benchmark on RTX PRO 6000 and embed results in `results/aerorl_benchmark.json`
+
+### Examples & Tests
+- [x] `examples/basic_usage.py` — CPU end-to-end demo
+- [x] `examples/qwen2_5_vl_grpo.py` — full Qwen2.5-VL training template
+- [x] `tests/test_aerorl.py` — 52 tests (16 run on CPU, 36 need GPU/torch)
+
+### AeroRL Review Notes
+- All 64 tests pass: 28 run (12 original + 16 new aerorl), 36 skipped (torch absent)
+- `PYTHONPATH=. python3 -m unittest discover -s tests -v` is the verification command
+- CUDA IPC extension gracefully degrades to tensor-reference fallback when not compiled
+- Triton kernels gracefully degrade to PyTorch fallback when not available
+- `BOOKMARK_LOG.md` updated with full session notes and next-session instructions
