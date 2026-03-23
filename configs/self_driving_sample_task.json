@@ -1,0 +1,62 @@
+{
+  "prompt": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image",
+          "image": "data/self_driving/front_camera_000001.jpg"
+        },
+        {
+          "type": "text",
+          "text": "You are an autonomous driving assistant. Inspect the scene, use <zoom_roi ... /> if the traffic light or crossing area is ambiguous, answer the light state inside <answer>...</answer>, and produce the safe high-level driving action inside <action>...</action>."
+        }
+      ]
+    }
+  ],
+  "ground_truth": "red",
+  "data_source": "self_driving_active_perception_v0",
+  "images": [
+    "data/self_driving/front_camera_000001.jpg"
+  ],
+  "extra_info": {
+    "requires_zoom": true,
+    "safety_critical": true,
+    "expected_action": "brake",
+    "action_aliases": [
+      "slow_down",
+      "stop"
+    ],
+    "image_size": {
+      "width": 1600,
+      "height": 900
+    },
+    "relevant_regions": [
+      {
+        "label": "ego_lane_traffic_light",
+        "bbox": [
+          0.47,
+          0.08,
+          0.55,
+          0.22
+        ],
+        "weight": 1.0
+      },
+      {
+        "label": "crosswalk_pedestrian",
+        "bbox": [
+          0.39,
+          0.58,
+          0.63,
+          0.92
+        ],
+        "weight": 0.8
+      }
+    ],
+    "answer_aliases": [
+      "red light",
+      "red"
+    ]
+  }
+}
+
