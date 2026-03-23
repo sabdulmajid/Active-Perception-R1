@@ -1,0 +1,46 @@
+{
+  "prompt": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image",
+          "image": "data/sample/chart.png"
+        },
+        {
+          "type": "text",
+          "text": "Read the blue value in the top-right inset. Think step by step, use <zoom_roi .../> when needed, and answer inside <answer>...</answer>."
+        }
+      ]
+    }
+  ],
+  "ground_truth": "42",
+  "data_source": "active_perception_v0",
+  "images": [
+    "data/sample/chart.png"
+  ],
+  "extra_info": {
+    "requires_zoom": true,
+    "image_size": {
+      "width": 1600,
+      "height": 1200
+    },
+    "relevant_regions": [
+      {
+        "label": "top_right_inset",
+        "bbox": [
+          0.68,
+          0.05,
+          0.96,
+          0.31
+        ],
+        "weight": 1.0
+      }
+    ],
+    "answer_aliases": [
+      "42",
+      "42.0"
+    ]
+  }
+}
+
