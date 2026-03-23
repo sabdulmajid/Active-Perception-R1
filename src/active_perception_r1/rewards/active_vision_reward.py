@@ -53,6 +53,42 @@ def _coerce_bool(value: Any, default: bool) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
+def _coerce_string(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if item is None:
+                continue
+            text = str(item)
+            if text.strip():
+                return text
+        return default
+    return str(value)
+
+
+def _coerce_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if isinstance(item, dict):
+                return item
+    return {}
+
+
+def _coerce_aliases(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if str(item).strip()]
+    return [str(value)]
+
+
 def _serialise_tokens(tokens: list[str]) -> str:
     return json.dumps(tokens, ensure_ascii=True)
 
@@ -86,13 +122,15 @@ def compute_score(
 
     del data_source
 
-    extra_info = extra_info or {}
+    extra_info = _coerce_dict(extra_info)
     weights = RewardWeights(process_reward_scale=float(process_reward_scale))
-    parse_result = parse_reasoning_trace(solution_str)
+    solution_text = _coerce_string(solution_str)
+    parse_result = parse_reasoning_trace(solution_text)
     env = SimulatedZoomEnvironment.from_extra_info(extra_info)
 
-    answer_aliases = [ground_truth, *extra_info.get("answer_aliases", [])]
-    prediction = extract_final_answer(solution_str)
+    ground_truth_text = _coerce_string(ground_truth)
+    answer_aliases = [ground_truth_text, *_coerce_aliases(extra_info.get("answer_aliases"))]
+    prediction = extract_final_answer(solution_text)
     normalized_prediction = normalize_answer(prediction)
     normalized_aliases = {normalize_answer(alias) for alias in answer_aliases if str(alias).strip()}
     outcome_correct = normalized_prediction in normalized_aliases

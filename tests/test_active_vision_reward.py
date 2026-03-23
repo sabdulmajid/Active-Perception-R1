@@ -103,6 +103,37 @@ class ActiveVisionRewardTests(unittest.TestCase):
         self.assertEqual(len(tokens), 1)
         self.assertIn("matched_region", tokens[0])
 
+    def test_handles_list_shaped_verl_payload_fields(self) -> None:
+        response = [
+            "<think><zoom_roi x0=\"0.68\" y0=\"0.05\" x1=\"0.95\" y1=\"0.30\" /></think>\n<answer>42</answer>"
+        ]
+        ground_truth = ["42"]
+        extra_info = [
+            {
+                "requires_zoom": True,
+                "image_size": {"width": 1600, "height": 1200},
+                "relevant_regions": [{"label": "inset", "bbox": [0.7, 0.08, 0.94, 0.28], "weight": 1.0}],
+                "answer_aliases": "forty two",
+            }
+        ]
+
+        reward = compute_score("active_perception_v0", response, ground_truth, extra_info=extra_info)
+
+        self.assertEqual(reward["acc"], 1.0)
+        self.assertEqual(reward["valid_zoom_count"], 1)
+        self.assertGreater(reward["best_region_coverage"], 0.8)
+
+    def test_accepts_scalar_answer_aliases(self) -> None:
+        response = "<think>No zoom.</think>\n<answer>forty two</answer>"
+        extra_info = {
+            "requires_zoom": False,
+            "answer_aliases": "forty two",
+        }
+
+        reward = compute_score("active_perception_v0", response, "42", extra_info=extra_info)
+
+        self.assertEqual(reward["acc"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

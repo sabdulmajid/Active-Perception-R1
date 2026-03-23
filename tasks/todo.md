@@ -1,5 +1,14 @@
 # Active-Perception-R1 Task Plan
 
+## Continuation — 2026-03-23 (Session Hardening)
+
+- [x] Identify a concrete implementation slice that improves real verl training robustness.
+- [x] Harden reward input handling for list-shaped / mixed payload fields from rollout pipelines.
+- [x] Add regression tests for list payloads and scalar alias metadata.
+- [x] Re-run local unit tests after edits.
+- [x] Write a bookmark handoff log so work survives disconnects.
+- [ ] Commit and push latest hardening changes.
+
 ## Objectives
 
 - [x] Review project guidance in `AGENTS.md`, `README.md`, and `BACKGROUND_RESEARCH.md`.
@@ -37,3 +46,12 @@
 - Verified launcher syntax with `bash -n scripts/train_grpo_active_vision.sh`.
 - Verified environment limitation: `torch`, `verl`, and `vllm` are not installed in this workspace yet, so no end-to-end GRPO training run was executed locally.
 - Research conclusion: the strongest first milestone is a verifiable crop-selection setup with dense process rewards, not a claim of fully solved general active perception.
+
+## Review Notes — Continuation 2026-03-23
+
+- Hardened `compute_score` in `src/active_perception_r1/rewards/active_vision_reward.py` to coerce list-shaped `solution_str`, `ground_truth`, and `extra_info` payloads.
+- Added alias coercion so `extra_info.answer_aliases` now supports scalar strings as well as list-like values.
+- Added two regression tests in `tests/test_active_vision_reward.py`:
+	- list-shaped verl payload fields path
+	- scalar `answer_aliases` path
+- Validation: `PYTHONPATH=src python3 -m unittest discover -s tests -v` now passes `9/9` tests.
