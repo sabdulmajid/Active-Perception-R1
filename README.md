@@ -19,14 +19,37 @@ This project gives you a practical way to measure and improve that gap with:
 - Tool-trace parser for `<zoom_roi .../>`: [src/active_perception_r1/utils/trace_parser.py](src/active_perception_r1/utils/trace_parser.py)
 - Crop/evidence simulator: [src/active_perception_r1/envs/zoom_simulator.py](src/active_perception_r1/envs/zoom_simulator.py)
 - Live reinjection loop (zoom -> crop -> reinject): [src/active_perception_r1/sim/live_reinjection.py](src/active_perception_r1/sim/live_reinjection.py)
-- Real benchmark runner with reproducible reports: [scripts/benchmark_active_vision.py](scripts/benchmark_active_vision.py)
+- Real benchmark runners with reproducible reports: [scripts/benchmark_active_vision.py](scripts/benchmark_active_vision.py), [scripts/benchmark_docvqa_suite.py](scripts/benchmark_docvqa_suite.py)
 - GRPO training launcher (verl + vLLM settings): [scripts/train_grpo_active_vision.sh](scripts/train_grpo_active_vision.sh)
 
-## Proven impact (real runs)
+## What this actually does
 
-### Real dataset leaderboard (DocVQA)
+Active perception means the model is allowed to **look again before finalizing an answer**.
 
-Expanded benchmark on `nielsr/docvqa_1200_examples` with **10 benchmark entries** (5 VLMs × 2 strategies):
+In this repo, that is implemented as:
+
+1. Model reads the full image and question.
+2. Model can emit a zoom tool call (`<zoom_roi .../>`).
+3. The system crops that region and re-injects it.
+4. Model gives the final answer.
+5. Reward checks both final correctness and whether zoom behavior was meaningful.
+
+In short: we do not reward only the final answer. We also reward good visual inspection behavior.
+
+## What the benchmark terms mean
+
+- **Baseline**: one-pass answer from the full image only (no active zoom loop).
+- **Active (`default`)**: model may use zoom, but not strictly enforced.
+- **Active (`strict_zoom`)**: model is forced to produce a valid zoom action first, then answer.
+- **Oracle crop**: upper-bound diagnostic where the model is directly shown the answer region crop (for headroom analysis, not a deployable mode).
+
+## Proven results (real data, GPU runs)
+
+Dataset: `nielsr/docvqa_1200_examples` (DocVQA test split)
+
+Hardware: dual NVIDIA RTX Pro 6000 (benchmark executed with real model inference on GPU)
+
+Coverage: **10 benchmark entries** = 5 VLMs × 2 active strategies
 
 | Model | Strategy | Baseline Acc | Active Acc | Active-Baseline |
 |---|---:|---:|---:|---:|
@@ -41,16 +64,38 @@ Expanded benchmark on `nielsr/docvqa_1200_examples` with **10 benchmark entries*
 | LLaVA-1.5-7B | `default` | 0.2500 | 0.0625 | -0.1875 |
 | LLaVA-1.5-7B | `strict_zoom` | 0.2500 | 0.1875 | -0.0625 |
 
-Impact summary:
+### Clear improvement (no jargon)
 
-- Mean `active_minus_baseline` improved from `-0.4000` (`default`) to `-0.0125` (`strict_zoom`).
-- Mean active accuracy gain from `strict_zoom`: `+0.3875`.
+- With weak zoom control (`default`), active mode underperforms baseline on average.
+- With enforced valid zoom (`strict_zoom`), active mode nearly matches baseline on average.
+- Mean active-vs-baseline gap improves from `-0.4000` to `-0.0125`.
+- Mean active accuracy lift from `strict_zoom` over `default`: `+0.3875`.
 
-Reports:
+Interpretation: the key win so far is **tool-use reliability**. Once zoom behavior is constrained correctly, most active-performance collapse disappears.
+
+### Proof artifacts
 
 - [reports/real_benchmark/leaderboard-2026-03-23.md](reports/real_benchmark/leaderboard-2026-03-23.md)
+- [reports/real_benchmark/docvqa-suite-20260323-230000.json](reports/real_benchmark/docvqa-suite-20260323-230000.json)
+- [reports/real_benchmark/docvqa-suite-20260323-230000.md](reports/real_benchmark/docvqa-suite-20260323-230000.md)
 - [reports/perf-iteration-2026-03-23.md](reports/perf-iteration-2026-03-23.md)
 - [reports/smoke-2026-03-23.md](reports/smoke-2026-03-23.md)
+
+## One concrete example
+
+Question (DocVQA style): “What is the invoice total?”
+
+Active-perception trace:
+
+```xml
+<think>
+Need to inspect the amount block in the lower-right.
+<zoom_roi x0="0.68" y0="0.74" x1="0.96" y1="0.95" />
+</think>
+<answer>$1,284.50</answer>
+```
+
+Why this matters: instead of guessing from the full page, the model explicitly zooms where small text usually lives, then answers from that evidence.
 
 ## Who should use this
 
@@ -95,21 +140,11 @@ VAL_BATCH_SIZE=8 \
 ./scripts/train_grpo_active_vision.sh
 ```
 
-## Example action trace
+## Scoring behavior
 
-```xml
-<think>
-I need to inspect the inset.
-<zoom_roi x0="0.68" y0="0.05" x1="0.95" y1="0.30" />
-</think>
-<answer>42</answer>
-```
-
-Scoring behavior:
-
-- Correct + relevant zoom: positive process reward
-- Correct but no zoom on zoom-required task: penalty
-- Invalid/random zoom: penalty
+- Correct answer + relevant zoom: positive reward
+- Correct answer but poor/invalid zoom behavior: reduced reward
+- Wrong answer: low reward regardless of trace
 
 ## Repository layout
 
