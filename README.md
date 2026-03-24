@@ -51,6 +51,21 @@ Hardware: dual NVIDIA RTX Pro 6000 (benchmark executed with real model inference
 
 Coverage: **10 benchmark entries** = 5 VLMs × 2 active strategies
 
+### Dataset snapshot (what was benchmarked)
+
+- Source dataset: `nielsr/docvqa_1200_examples`
+- Total dataset size: 1,200 documents (`train=1000`, `test=200`)
+- Fields per example: document image, question, ground-truth answer, answer aliases, OCR words, OCR bounding boxes
+- Benchmark slice used here: `test` split, 16 sampled questions per run, seed `29`
+- Total evaluated QA instances in this report: 160 (`5 models × 2 strategies × 16 questions`)
+
+### Example questions from the benchmark dataset
+
+- “What the location address of NSDA?” → “1128 SIXTEENTH ST., N. W., WASHINGTON, D. C. 20036”
+- “According to budget request summary what is total amount of other expenses?” → “$975.00”
+- “Who is ‘presiding’ TRRF GENERAL SESSION (PART 1)?” → “TRRF Vice President”
+- “How many nomination committee meetings has Y. C. Deveshwar attended?” → “2”
+
 | Model | Strategy | Baseline Acc | Active Acc | Active-Baseline |
 |---|---:|---:|---:|---:|
 | SmolVLM-500M | `default` | 0.6250 | 0.5625 | -0.0625 |
@@ -72,6 +87,12 @@ Coverage: **10 benchmark entries** = 5 VLMs × 2 active strategies
 - Mean active accuracy lift from `strict_zoom` over `default`: `+0.3875`.
 
 Interpretation: the key win so far is **tool-use reliability**. Once zoom behavior is constrained correctly, most active-performance collapse disappears.
+
+### What this achieved using this library
+
+- The library turns passive one-shot VLM answering into an explicit inspect-then-answer pipeline.
+- It measures both **answer correctness** and **quality of visual actions**, so we can diagnose *why* active mode succeeds or fails.
+- In this benchmark, adding strict zoom-action control moved active performance from clearly below baseline to almost parity with baseline on average.
 
 ### Proof artifacts
 
