@@ -17,6 +17,7 @@ CHECKPOINT_DIR="${CHECKPOINT_DIR:-${REPO_ROOT}/checkpoints/active_vision_grpo}"
 PROJECT_NAME="${PROJECT_NAME:-Active-Perception-R1}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-qwen25vl7b_grpo_active_vision}"
 REWARD_MODULE="${REWARD_MODULE:-${REPO_ROOT}/src/active_perception_r1/rewards/active_vision_reward.py}"
+AGENT_LOOP_CONFIG_PATH="${AGENT_LOOP_CONFIG_PATH:-${REPO_ROOT}/configs/agent_loop/active_perception_zoom_agent.yaml}"
 
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
 VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-16}"
@@ -42,6 +43,8 @@ PROCESS_REWARD_SCALE="${PROCESS_REWARD_SCALE:-0.35}"
 MAX_ZOOM_CALLS="${MAX_ZOOM_CALLS:-3}"
 MIN_RELATIVE_AREA="${MIN_RELATIVE_AREA:-0.02}"
 MAX_RELATIVE_AREA="${MAX_RELATIVE_AREA:-0.65}"
+MAX_ASSISTANT_TURNS="${MAX_ASSISTANT_TURNS:-4}"
+MAX_USER_TURNS="${MAX_USER_TURNS:-3}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-sdpa}"
 ALLOW_BUSY_GPU="${ALLOW_BUSY_GPU:-0}"
 
@@ -121,6 +124,11 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.rollout.free_cache_engine=True \
   actor_rollout_ref.rollout.n="${N_RESPONSES}" \
   actor_rollout_ref.rollout.calculate_log_probs=True \
+  actor_rollout_ref.rollout.multi_turn.enable=True \
+  actor_rollout_ref.rollout.multi_turn.max_assistant_turns="${MAX_ASSISTANT_TURNS}" \
+  actor_rollout_ref.rollout.multi_turn.max_user_turns="${MAX_USER_TURNS}" \
+  actor_rollout_ref.rollout.agent.default_agent_loop=active_perception_zoom_agent \
+  actor_rollout_ref.rollout.agent.agent_loop_config_path="${AGENT_LOOP_CONFIG_PATH}" \
   +actor_rollout_ref.rollout.engine_kwargs.vllm.disable_mm_preprocessor_cache=True \
   reward.custom_reward_function.path="${REWARD_MODULE}" \
   reward.custom_reward_function.name=compute_score \

@@ -134,6 +134,56 @@ class ActiveVisionRewardTests(unittest.TestCase):
 
         self.assertEqual(reward["acc"], 1.0)
 
+    def test_prefers_executed_tool_trace_when_present(self) -> None:
+        response = "<think>I already inspected the detail.</think>\n<answer>42</answer>"
+        extra_info = {
+            "requires_zoom": True,
+            "relevant_regions": [{"label": "inset", "bbox": [0.7, 0.08, 0.94, 0.28], "weight": 1.0}],
+            "active_tool_trace": [
+                {
+                    "status": "zoom_executed",
+                    "tool_reward": 0.95,
+                    "coverage": 0.9,
+                    "iou": 0.82,
+                    "matched_region": "inset",
+                    "observation_token": '<image_crop step="1" matched_region="inset" coverage="0.9000" iou="0.8200" />',
+                }
+            ],
+        }
+
+        reward = compute_score("active_perception_v0", response, "42", extra_info=extra_info)
+
+        self.assertEqual(reward["tool_trace_source"], "executed")
+        self.assertEqual(reward["valid_zoom_count"], 1)
+        self.assertGreater(reward["score"], 1.0)
+        self.assertIn("matched_region", reward["augmented_context"])
+
+    def test_executed_tool_trace_overrides_parse_only_fallback(self) -> None:
+        response = (
+            "<think>"
+            '<zoom_roi x0="0.68" y0="0.05" x1="0.95" y1="0.30" />'
+            "</think>\n<answer>0</answer>"
+        )
+        extra_info = {
+            "requires_zoom": True,
+            "image_size": {"width": 1600, "height": 1200},
+            "relevant_regions": [{"label": "inset", "bbox": [0.7, 0.08, 0.94, 0.28], "weight": 1.0}],
+            "active_tool_trace": [
+                {
+                    "status": "invalid_bbox",
+                    "tool_reward": -0.20,
+                    "observation_token": '<tool_error code="out_of_bounds" detail="bad crop" />',
+                }
+            ],
+        }
+
+        reward = compute_score("active_perception_v0", response, "0", extra_info=extra_info)
+
+        self.assertEqual(reward["tool_trace_source"], "executed")
+        self.assertEqual(reward["valid_zoom_count"], 0)
+        self.assertEqual(reward["out_of_bounds_zoom_count"], 1)
+        self.assertLess(reward["process_reward"], -0.3)
+
 
 if __name__ == "__main__":
     unittest.main()

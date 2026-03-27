@@ -126,8 +126,8 @@
 - [x] Compare the current launcher and benchmark approach against current official verl, vLLM, and model guidance.
 - [x] Fix the benchmark protocol so `strict_zoom` never falls back to full-image answering; report tool failure separately from active-answer accuracy.
 - [x] Rewrite README/report claims to distinguish scaffolded behavior from proven multi-turn active perception.
-- [ ] Rebuild training around verl multi-turn tool execution so a `<zoom_roi .../>` action can trigger crop reinjection during rollout, not only post-hoc reward scoring.
-- [ ] Introduce an explicit crop/tool environment contract (`tool_config`, observation payloads, raw chat retention, bounded retries, failure states).
+- [x] Rebuild training around verl multi-turn tool execution so a `<zoom_roi .../>` action can trigger crop reinjection during rollout, not only post-hoc reward scoring.
+- [x] Introduce an explicit crop/tool environment contract (`tool_config`, observation payloads, raw chat retention, bounded retries, failure states).
 - [ ] Replace the toy train/val parquet with a real train/dev mixture for document OCR, chart QA, and grounded region supervision.
 - [x] Add benchmark invariants and smoke tests for: no-fallback strict mode, reward payload compatibility, and training startup dependency checks.
 - [x] Package the project with pinned training/inference extras and reproducible cache/env setup so `pip install -e .[train]` is enough to launch.
@@ -135,6 +135,16 @@
 - [ ] Tier 1 baseline: Qwen2.5-VL-7B or Qwen3-VL-8B
 - [ ] Tier 2 stronger research run: Qwen2.5-VL-32B or Qwen3-VL-32B
 - [ ] Tier 3 ablations: smaller Qwen/SmolVLM checkpoints for fast reward and prompt-loop experiments
+
+## Implementation Slice — 2026-03-27 (True Multi-Turn Active Perception)
+
+- [x] Implement a repo-local verl agent loop that treats `<zoom_roi .../>` as a real multi-turn action during rollout.
+- [x] Track current-view-to-original-image geometry so repeated zooms compose correctly instead of recropping the full image each turn.
+- [x] Reinject executed crops back into the conversation as multimodal observations with bounded retries and explicit tool-error states.
+- [x] Extend the reward path so executed tool-trace metadata can be scored directly, with parse-only scoring kept as a fallback for benchmarks/tests.
+- [x] Wire the GRPO launcher to the new agent loop with clean config files and environment toggles.
+- [x] Add unit and fake-server integration tests for the new agent loop, view-bbox composition, and reward/tool-trace handling.
+- [x] Re-run local verification (`unittest`, `compileall`, shell validation) and record any remaining runtime blockers.
 
 ## Implementation Slice — 2026-03-27 (Benchmark/Runtime Hardening)
 
@@ -212,4 +222,25 @@
 - Follow-up remediation landed in this pass:
 	- train dependencies are now pinned to a supported `verl==0.7.1` / `vllm==0.12.0` / `torch==2.9.0` stack with `transformers<5`
 	- preflight now performs a deeper `vllm` runtime import and metadata-level compatibility checks so this class of failure is caught before a long Ray/FSDP startup
-	- direct validation: `PYTHONPATH=src:.vendor_train:.vendor python3 -m active_perception_r1.utils.preflight ...` now fails immediately with a targeted ABI-mismatch error instead of failing deep inside Ray worker initialization
+- direct validation: `PYTHONPATH=src:.vendor_train:.vendor python3 -m active_perception_r1.utils.preflight ...` now fails immediately with a targeted ABI-mismatch error instead of failing deep inside Ray worker initialization
+
+## Review Notes — True Multi-Turn Rollout 2026-03-27
+
+- Added `src/active_perception_r1/rollout/active_perception_agent.py`, a repo-local verl agent loop that executes `<zoom_roi .../>` actions during rollout instead of only parsing them post hoc in the reward function.
+- Added `src/active_perception_r1/rollout/zoom_runtime.py` to centralize zoom execution, nested-view bbox composition, crop generation, observation messages, and explicit tool failure states.
+- Added `configs/agent_loop/active_perception_zoom_agent.yaml` and wired `scripts/train_grpo_active_vision.sh` to enable multi-turn rollout with the new agent loop.
+- Extended `src/active_perception_r1/rewards/active_vision_reward.py` so executed tool traces take precedence over parse-only reconstruction when rollout metadata is available.
+- Added new coverage:
+	- `tests/test_zoom_runtime.py`
+	- `tests/test_active_perception_agent.py`
+	- additional executed-trace reward cases in `tests/test_active_vision_reward.py`
+- Validation:
+	- `PYTHONPATH=src python3 -m unittest discover -s tests -v` passes `30/30`
+	- `python3 -m compileall src scripts tests` passes
+	- `bash -n scripts/train_grpo_active_vision.sh` passes
+- GPU state was checked before train-side validation:
+	- GPU 0: `67 MiB`, `0%`
+	- GPU 1: `18 MiB`, `0%`
+- Train-side blocker in the active shell is now explicit and shallow:
+	- `PYTHONPATH=src python3 -m active_perception_r1.utils.preflight ...` fails because the active interpreter does not have the pinned `train` dependencies installed (`verl`, `vllm`, `pybase64`, `ray`, `gguf`)
+	- the repo-side wiring is in place, but a fresh `pip install -e .[train]` environment is still required before a real GRPO smoke launch

@@ -19,6 +19,7 @@ This project gives you a practical way to measure and improve that gap with:
 - Tool-trace parser for `<zoom_roi .../>`: [src/active_perception_r1/utils/trace_parser.py](src/active_perception_r1/utils/trace_parser.py)
 - Crop/evidence simulator: [src/active_perception_r1/envs/zoom_simulator.py](src/active_perception_r1/envs/zoom_simulator.py)
 - Live reinjection loop (zoom -> crop -> reinject): [src/active_perception_r1/sim/live_reinjection.py](src/active_perception_r1/sim/live_reinjection.py)
+- verl multi-turn agent loop for executable zoom actions during rollout: [src/active_perception_r1/rollout/active_perception_agent.py](src/active_perception_r1/rollout/active_perception_agent.py)
 - Real benchmark runners with reproducible reports: [scripts/benchmark_active_vision.py](scripts/benchmark_active_vision.py), [scripts/benchmark_docvqa_suite.py](scripts/benchmark_docvqa_suite.py)
 - GRPO training launcher (verl + vLLM settings): [scripts/train_grpo_active_vision.sh](scripts/train_grpo_active_vision.sh)
 
@@ -70,7 +71,7 @@ These are the first honest reruns after strict-mode fail-closed hardening.
   - `strict_zoom`: baseline `0.7500`, active `0.1250`, delta `-0.6250`
   - `strict_zoom` crop usage / satisfaction: `0.1250`
 
-Interpretation: once strict mode actually fails closed, the current prompt-level zoom policy is materially worse than baseline on real DocVQA. That is the honest result, and it means the next major investment should be true multi-turn tool execution in training rather than more benchmark prompt tuning.
+Interpretation: once strict mode actually fails closed, the current prompt-level zoom policy is materially worse than baseline on real DocVQA. That was the right forcing function: the repo now includes a true multi-turn verl agent loop for executable zoom actions during rollout, so the next work is environment bring-up and real training on that path rather than more benchmark prompt tuning.
 
 ## Exploratory results (real data, pre-hardening protocol)
 
@@ -198,6 +199,8 @@ VAL_BATCH_SIZE=8 \
 
 The train preflight now does a deeper runtime check for `vllm` and will fail early on broken binary stacks such as mismatched `torch` / `vllm` wheels. The supported launcher pins in this repo are currently centered on `verl==0.7.1`, `vllm==0.12.0`, `torch==2.9.0`, `torchaudio==2.9.0`, `torchvision==0.24.0`, and `transformers<5`.
 
+The launcher now enables verl multi-turn rollout with the repo-local agent config at [configs/agent_loop/active_perception_zoom_agent.yaml](configs/agent_loop/active_perception_zoom_agent.yaml). The model emits `<zoom_roi .../>`, the agent loop executes the crop, reinjects the crop plus observation token, and the reward function scores the executed trace directly when that metadata is present.
+
 ## Scoring behavior
 
 - Correct answer + relevant zoom: positive reward
@@ -207,9 +210,9 @@ The train preflight now does a deeper runtime check for `vllm` and will fail ear
 ## Repository layout
 
 ```text
-configs/   sample task schema
+configs/   agent-loop config and runtime schema
 scripts/   training and benchmark runners
-src/       reward/parser/simulator/live-reinjection code
+src/       reward/parser/simulator/rollout/live-reinjection code
 tests/     unit tests
 reports/   benchmark artifacts and summaries
 ```
@@ -219,6 +222,7 @@ reports/   benchmark artifacts and summaries
 - Core active-perception logic is implemented and tested.
 - Benchmarking is implemented with real model runs and saved artifacts.
 - Strict-mode benchmarking is now fail-closed instead of silently reverting to baseline behavior.
-- End-to-end multi-turn verl tool execution is still future work; current training remains a scaffold plus reward/reinjection prototype.
+- End-to-end multi-turn verl tool execution is implemented in the repo-local agent loop and covered by fake-server integration tests.
+- A fresh train environment is still required for a real GRPO smoke launch in this shell; the active interpreter currently lacks the pinned `train` dependencies.
 
 This is a production-minded research scaffold: measurable, reproducible, and focused on real model behavior.

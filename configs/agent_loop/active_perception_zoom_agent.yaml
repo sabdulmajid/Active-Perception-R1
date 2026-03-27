@@ -1,0 +1,5 @@
+- name: active_perception_zoom_agent
+  _target_: active_perception_r1.rollout.active_perception_agent.ActivePerceptionZoomAgentLoop
+  max_zoom_calls: 3
+  min_relative_area: 0.02
+  max_relative_area: 0.65
