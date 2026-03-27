@@ -118,3 +118,61 @@
 - Corrected dataset field handling to use language/text dicts and alias-aware scoring to avoid false negatives.
 - Confirmed 10 real benchmark entries (5 models x 2 strategies), consolidated in `reports/real_benchmark/leaderboard-2026-03-23.md`.
 - Current aggregate finding: mean `active_minus_baseline` improved from `-0.4000` (`default`) to `-0.0125` (`strict_zoom`).
+
+## Review + Industry Standardization — 2026-03-27
+
+- [x] Audit the repository end-to-end: source, scripts, tests, reports, data schema, and runtime logs.
+- [x] Verify local checks that are feasible in-workspace (`unittest`, `bash -n`, GPU inventory, package availability).
+- [x] Compare the current launcher and benchmark approach against current official verl, vLLM, and model guidance.
+- [x] Fix the benchmark protocol so `strict_zoom` never falls back to full-image answering; report tool failure separately from active-answer accuracy.
+- [x] Rewrite README/report claims to distinguish scaffolded behavior from proven multi-turn active perception.
+- [ ] Rebuild training around verl multi-turn tool execution so a `<zoom_roi .../>` action can trigger crop reinjection during rollout, not only post-hoc reward scoring.
+- [ ] Introduce an explicit crop/tool environment contract (`tool_config`, observation payloads, raw chat retention, bounded retries, failure states).
+- [ ] Replace the toy train/val parquet with a real train/dev mixture for document OCR, chart QA, and grounded region supervision.
+- [x] Add benchmark invariants and smoke tests for: no-fallback strict mode, reward payload compatibility, and training startup dependency checks.
+- [x] Package the project with pinned training/inference extras and reproducible cache/env setup so `pip install -e .[train]` is enough to launch.
+- [ ] Establish a staged model ladder for 2 x RTX Pro 6000:
+- [ ] Tier 1 baseline: Qwen2.5-VL-7B or Qwen3-VL-8B
+- [ ] Tier 2 stronger research run: Qwen2.5-VL-32B or Qwen3-VL-32B
+- [ ] Tier 3 ablations: smaller Qwen/SmolVLM checkpoints for fast reward and prompt-loop experiments
+
+## Implementation Slice — 2026-03-27 (Benchmark/Runtime Hardening)
+
+- [x] Add a shared benchmark protocol module so strategy behavior is tested independently of heavyweight model loading.
+- [x] Make `strict_zoom` fail closed: no full-image fallback, explicit `tool_status`, `tool_retry_count`, and `strict_zoom_satisfied` fields.
+- [x] Add a GPU preflight utility and call it before benchmark/train launches; block heavy runs on busy GPUs unless explicitly overridden.
+- [x] Add runtime dependency preflight for train launcher (`torch`, `verl`, `vllm`, `pybase64`, `ray`) with actionable error messages.
+- [x] Add script-level tests for strict-mode semantics and GPU/dependency preflight parsing.
+- [x] Update README install and benchmark sections to reflect the new preflight behavior and honest benchmark interpretation.
+- [x] Verify with local unit tests and shell checks; only run GPU experiments if both GPUs are sufficiently idle.
+- [ ] Commit and push the curated hardening changes.
+
+## Review Notes — Architecture Assessment 2026-03-27
+
+- Local unit tests pass (`11/11`), parser/reward code is readable, and the synthetic/real benchmark scripts make the project easy to inspect.
+- The core claim is not yet realized in training: `compute_score` produces `augmented_context`, but the verl launcher never uses a multi-turn/tool-execution path, so rollout remains passive single-turn generation.
+- The current `strict_zoom` benchmark path is not actually strict; both benchmark runners fall back to a normal full-image answer if the zoom step fails, which can make active accuracy appear equal to baseline without real tool use.
+- Packaging/runtime was scaffold-level at review time: the default Python environment in this workspace could not import `verl` or `vllm`, and the captured GRPO smoke run failed on a missing `pybase64` dependency inside vLLM startup.
+- The included parquet training set is only a tiny synthetic sample (`10` train / `2` val); it is useful for plumbing checks, not for learning a robust active-perception policy.
+- Best near-term value: harden the benchmark and environment first, then move the RL path onto verl multi-turn tool execution before spending large GPU budget on longer runs.
+
+## Review Notes — Benchmark/Runtime Hardening 2026-03-27
+
+- Added shared benchmark helpers in `src/active_perception_r1/bench/protocol.py` so active-strategy semantics are testable without loading large models.
+- `strict_zoom` now fails closed: if the model never emits a valid zoom after bounded retries, the benchmark records tool failure instead of falling back to a full-image answer.
+- Added explicit reporting fields across benchmark scripts:
+	- `tool_status`
+	- `tool_retry_count`
+	- `strict_zoom_satisfied`
+- Added `src/active_perception_r1/utils/preflight.py` and wired it into benchmark/train entrypoints to:
+	- verify GPU occupancy before heavy runs
+	- block launches on busy GPUs unless explicitly overridden
+	- fail fast on missing runtime dependencies with an install hint
+- Added `tests/test_benchmark_protocol.py`; local verification now passes `18/18` tests.
+- Additional validation:
+	- `bash -n scripts/train_grpo_active_vision.sh` passes
+	- `python3 -m compileall src scripts tests` passes
+	- direct preflight smoke check correctly refused a 2-GPU training launch while one GPU was busy
+- Deliberately did not re-run real benchmarks in this pass because GPU state was not clean enough for a non-contentious experiment:
+	- at verification time only `1/2` GPUs was idle
+	- the new preflight guard is intended to enforce that discipline

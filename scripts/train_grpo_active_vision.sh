@@ -43,12 +43,26 @@ MAX_ZOOM_CALLS="${MAX_ZOOM_CALLS:-3}"
 MIN_RELATIVE_AREA="${MIN_RELATIVE_AREA:-0.02}"
 MAX_RELATIVE_AREA="${MAX_RELATIVE_AREA:-0.65}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-sdpa}"
+ALLOW_BUSY_GPU="${ALLOW_BUSY_GPU:-0}"
 
 if [[ -n "${WANDB_API_KEY:-}" ]]; then
   LOGGER='["console","wandb"]'
 else
   LOGGER='["console"]'
 fi
+
+PREFLIGHT_ARGS=(
+  --purpose "grpo_training"
+  --required-gpus "${N_GPUS_PER_NODE}"
+  --modules "torch,verl,vllm,pybase64,ray"
+  --install-hint "pip install -e .[train]"
+)
+
+if [[ "${ALLOW_BUSY_GPU}" == "1" ]]; then
+  PREFLIGHT_ARGS+=(--allow-busy-gpu)
+fi
+
+python3 -m active_perception_r1.utils.preflight "${PREFLIGHT_ARGS[@]}"
 
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
@@ -120,4 +134,3 @@ python3 -m verl.trainer.main_ppo \
   trainer.test_freq="${TEST_FREQ}" \
   trainer.total_epochs="${TOTAL_EPOCHS}" \
   "$@"
-

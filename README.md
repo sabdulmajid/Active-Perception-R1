@@ -40,10 +40,22 @@ In short: we do not reward only the final answer. We also reward good visual ins
 
 - **Baseline**: one-pass answer from the full image only (no active zoom loop).
 - **Active (`default`)**: model may use zoom, but not strictly enforced.
-- **Active (`strict_zoom`)**: model is forced to produce a valid zoom action first, then answer.
+- **Active (`strict_zoom`)**: the benchmark requires a valid zoom action before answering; invalid zoom attempts are now treated as tool failure rather than silently falling back to baseline behavior.
 - **Oracle crop**: upper-bound diagnostic where the model is directly shown the answer region crop (for headroom analysis, not a deployable mode).
 
-## Proven results (real data, GPU runs)
+## Benchmark status
+
+The repository contains real GPU benchmark artifacts, but the older committed `strict_zoom` reports were generated before fail-closed strict-mode hardening. Treat those numbers as exploratory protocol-development results, not canonical evidence of robust active-perception behavior.
+
+The code now distinguishes:
+
+- successful zoom execution
+- malformed / invalid zoom attempts
+- answered-without-zoom failures in strict mode
+
+Any new benchmark intended for publication should be re-run with the hardened scripts in this commit.
+
+## Exploratory results (real data, pre-hardening protocol)
 
 Dataset: `nielsr/docvqa_1200_examples` (DocVQA test split)
 
@@ -86,7 +98,7 @@ Coverage: **10 benchmark entries** = 5 VLMs × 2 active strategies
 - Mean active-vs-baseline gap improves from `-0.4000` to `-0.0125`.
 - Mean active accuracy lift from `strict_zoom` over `default`: `+0.3875`.
 
-Interpretation: the key win so far is **tool-use reliability**. Once zoom behavior is constrained correctly, most active-performance collapse disappears.
+Interpretation: these runs showed that prompt-level tool control matters, but they did not yet prove robust active perception because the earlier protocol still allowed benchmark-time fallback behavior in strict mode.
 
 ### What this achieved using this library
 
@@ -131,7 +143,7 @@ Use this project if you are:
 ### 1) Install
 
 ```bash
-pip install -e .
+pip install -e .[bench]
 ```
 
 ### 2) Validate core logic
@@ -151,9 +163,13 @@ python3 scripts/benchmark_active_vision.py \
   --output-dir reports/active_benchmark
 ```
 
+The benchmark now performs a GPU occupancy preflight and will refuse to start if the required GPUs are already busy unless you explicitly pass `--allow-busy-gpu`.
+
 ### 4) Run GRPO launcher
 
 ```bash
+pip install -e .[train]
+
 MODEL_PATH=Qwen/Qwen2.5-VL-3B-Instruct \
 N_RESPONSES=2 \
 TRAIN_BATCH_SIZE=8 \
@@ -181,6 +197,7 @@ reports/   benchmark artifacts and summaries
 
 - Core active-perception logic is implemented and tested.
 - Benchmarking is implemented with real model runs and saved artifacts.
-- Performance improvement path is validated with measured A/B gains.
+- Strict-mode benchmarking is now fail-closed instead of silently reverting to baseline behavior.
+- End-to-end multi-turn verl tool execution is still future work; current training remains a scaffold plus reward/reinjection prototype.
 
 This is a production-minded research scaffold: measurable, reproducible, and focused on real model behavior.

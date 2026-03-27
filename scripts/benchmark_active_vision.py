@@ -7,6 +7,7 @@ import os
 import random
 import statistics
 import time
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,13 +15,17 @@ from typing import Any
 import torch
 from PIL import Image, ImageDraw
 
+from active_perception_r1.bench.protocol import (
+    crop_from_bbox,
+    run_active_default,
+    run_active_strict_zoom,
+)
 from active_perception_r1.rewards.active_vision_reward import (
     compute_score,
     extract_final_answer,
     normalize_answer,
 )
-from active_perception_r1.sim.live_reinjection import run_live_reinjection_episode
-from active_perception_r1.utils.trace_parser import parse_reasoning_trace
+from active_perception_r1.utils.preflight import require_dependencies, require_idle_gpus
 
 
 @dataclass
@@ -30,23 +35,6 @@ class BenchmarkExample:
     ground_truth: str
     bbox_norm: tuple[float, float, float, float]
     extra_info: dict[str, Any]
-
-
-def clamp(value: float, low: float, high: float) -> float:
-    return max(low, min(high, value))
-
-
-def normalized_to_pixels(
-    bbox_norm: tuple[float, float, float, float], width: int, height: int
-) -> tuple[int, int, int, int]:
-    x0, y0, x1, y1 = bbox_norm
-    return (
-        int(round(clamp(x0, 0.0, 1.0) * width)),
-        int(round(clamp(y0, 0.0, 1.0) * height)),
-        int(round(clamp(x1, 0.0, 1.0) * width)),
-        int(round(clamp(y1, 0.0, 1.0) * height)),
-    )
-
 
 def parse_int_answer(text: str) -> str:
     candidate = extract_final_answer(text)
@@ -152,81 +140,12 @@ class VisionBenchModel:
                 **inputs,
                 max_new_tokens=self.max_new_tokens,
                 do_sample=False,
-                temperature=0.0,
             )
 
         input_len = inputs["input_ids"].shape[1]
         completion_ids = generated[:, input_len:]
         text_out = self.processor.batch_decode(completion_ids, skip_special_tokens=True)[0]
         return text_out.strip()
-
-
-def crop_from_bbox(image: Image.Image, bbox_norm: tuple[float, float, float, float]) -> Image.Image:
-    x0, y0, x1, y1 = normalized_to_pixels(bbox_norm, image.width, image.height)
-    if x1 <= x0:
-        x1 = min(image.width, x0 + 1)
-    if y1 <= y0:
-        y1 = min(image.height, y0 + 1)
-    return image.crop((x0, y0, x1, y1))
-
-
-def crop_from_zoom_trace(image: Image.Image, response: str) -> Image.Image | None:
-    parsed = parse_reasoning_trace(response)
-    if not parsed.zoom_calls:
-        return None
-    first = parsed.zoom_calls[0]
-    if not first.is_well_formed():
-        return None
-    bbox_norm = first.to_normalized_bbox(image.width, image.height)
-    return crop_from_bbox(image, bbox_norm)
-
-
-def _run_active_default(model: VisionBenchModel, image: Image.Image) -> tuple[str, str, bool, int]:
-    active_prompt_1 = (
-        "Think step by step. If you need to inspect details, output one tool tag in your think block as "
-        "<zoom_roi x0=\"...\" y0=\"...\" x1=\"...\" y1=\"...\" /> using normalized coordinates, then answer "
-        "as <answer>...</answer>."
-    )
-    live_result = run_live_reinjection_episode(
-        image=image,
-        task_text=active_prompt_1,
-        generator=model.generate,
-        max_steps=3,
-    )
-    active_pass_1 = live_result.steps[0].response if live_result.steps else ""
-    active_final_response = live_result.final_response
-    used_crop = live_result.used_zoom_count > 0
-    return active_pass_1, active_final_response, used_crop, len(live_result.steps)
-
-
-def _run_active_strict_zoom(model: VisionBenchModel, image: Image.Image) -> tuple[str, str, bool, int]:
-    zoom_only_prompt = (
-        "Output ONLY one tag in this exact format and nothing else: "
-        "<zoom_roi x0=\"0.00\" y0=\"0.00\" x1=\"1.00\" y1=\"1.00\" />. "
-        "Choose the smallest region that likely contains the blue numeric value in the top-right inset."
-    )
-    zoom_response = model.generate([image], zoom_only_prompt)
-    dynamic_crop = crop_from_zoom_trace(image, zoom_response)
-
-    if dynamic_crop is None:
-        retry_prompt = (
-            "Your previous output was invalid. Return ONLY a valid zoom tag exactly like: "
-            "<zoom_roi x0=\"0.70\" y0=\"0.05\" x1=\"0.95\" y1=\"0.30\" />"
-        )
-        zoom_response = model.generate([image], retry_prompt)
-        dynamic_crop = crop_from_zoom_trace(image, zoom_response)
-
-    if dynamic_crop is None:
-        fallback_prompt = "Read the blue numeric value in the image and answer only as <answer>...</answer>."
-        final_response = model.generate([image], fallback_prompt)
-        return zoom_response, final_response, False, 1
-
-    answer_prompt = (
-        "You have the original image and a zoomed crop. Read the blue numeric value and answer only as "
-        "<answer>...</answer>."
-    )
-    final_response = model.generate([image, dynamic_crop], answer_prompt)
-    return zoom_response, final_response, True, 2
 
 
 def run_example(
@@ -247,14 +166,39 @@ def run_example(
     oracle_response = model.generate([oracle_crop], oracle_prompt)
 
     if active_strategy == "strict_zoom":
-        active_pass_1, active_final_response, used_crop, active_steps = _run_active_strict_zoom(model, image)
+        active_run = run_active_strict_zoom(
+            image=image,
+            generator=model.generate,
+            zoom_prompt=(
+                "Output ONLY one tag in this exact format and nothing else: "
+                "<zoom_roi x0=\"0.00\" y0=\"0.00\" x1=\"1.00\" y1=\"1.00\" />. "
+                "Choose the smallest region that likely contains the blue numeric value in the top-right inset."
+            ),
+            retry_prompt=(
+                "Your previous output was invalid. Return ONLY a valid zoom tag exactly like: "
+                "<zoom_roi x0=\"0.70\" y0=\"0.05\" x1=\"0.95\" y1=\"0.30\" />"
+            ),
+            answer_prompt=(
+                "You have the original image and a zoomed crop. Read the blue numeric value and answer only as "
+                "<answer>...</answer>."
+            ),
+        )
     else:
-        active_pass_1, active_final_response, used_crop, active_steps = _run_active_default(model, image)
+        active_run = run_active_default(
+            image=image,
+            task_text=(
+                "Think step by step. If you need to inspect details, output one tool tag in your think block as "
+                "<zoom_roi x0=\"...\" y0=\"...\" x1=\"...\" y1=\"...\" /> using normalized coordinates, then answer "
+                "as <answer>...</answer>."
+            ),
+            generator=model.generate,
+            max_steps=3,
+        )
 
     gt_norm = normalize_answer(example.ground_truth)
     baseline_pred = parse_int_answer(baseline_response)
     oracle_pred = parse_int_answer(oracle_response)
-    active_pred = parse_int_answer(active_final_response)
+    active_pred = parse_int_answer(active_run.final_response)
 
     baseline_acc = float(normalize_answer(str(baseline_pred)) == gt_norm)
     oracle_acc = float(normalize_answer(str(oracle_pred)) == gt_norm)
@@ -262,7 +206,7 @@ def run_example(
 
     reward_dict = compute_score(
         data_source="active_perception_v0",
-        solution_str=active_pass_1 + "\n" + active_final_response,
+        solution_str=active_run.scoring_trace,
         ground_truth=example.ground_truth,
         extra_info=example.extra_info,
     )
@@ -272,9 +216,9 @@ def run_example(
         "ground_truth": example.ground_truth,
         "baseline_response": baseline_response,
         "oracle_response": oracle_response,
-        "active_pass_1": active_pass_1,
-        "active_final_response": active_final_response,
-        "active_steps": active_steps,
+        "active_pass_1": active_run.initial_response,
+        "active_final_response": active_run.final_response,
+        "active_steps": active_run.step_count,
         "active_strategy": active_strategy,
         "baseline_pred": str(baseline_pred),
         "oracle_pred": str(oracle_pred),
@@ -282,7 +226,10 @@ def run_example(
         "baseline_acc": baseline_acc,
         "oracle_acc": oracle_acc,
         "active_acc": active_acc,
-        "active_used_crop": used_crop,
+        "active_used_crop": active_run.used_crop,
+        "tool_status": active_run.tool_status,
+        "tool_retry_count": active_run.tool_retry_count,
+        "strict_zoom_satisfied": active_run.strict_zoom_satisfied,
         "reward_score": reward_dict["score"],
         "reward_visual": reward_dict["visual_perception_reward"],
         "reward_relevant_zoom_count": reward_dict["relevant_zoom_count"],
@@ -295,6 +242,8 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     active_acc = statistics.mean(row["active_acc"] for row in rows)
     used_crop_rate = statistics.mean(float(row["active_used_crop"]) for row in rows)
     avg_reward = statistics.mean(float(row["reward_score"]) for row in rows)
+    strict_satisfied_rate = statistics.mean(float(row["strict_zoom_satisfied"]) for row in rows)
+    tool_status_counts = dict(Counter(row["tool_status"] for row in rows))
 
     return {
         "n": len(rows),
@@ -302,9 +251,11 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "oracle_crop_acc": oracle_acc,
         "active_two_pass_acc": active_acc,
         "active_crop_usage_rate": used_crop_rate,
+        "strict_zoom_satisfied_rate": strict_satisfied_rate,
         "average_active_reward_score": avg_reward,
         "active_minus_baseline": active_acc - baseline_acc,
         "oracle_minus_baseline": oracle_acc - baseline_acc,
+        "tool_status_counts": tool_status_counts,
     }
 
 
@@ -324,9 +275,11 @@ def write_markdown_report(path: Path, model_id: str, summary: dict[str, Any], du
         f"- oracle_crop_acc: `{summary['oracle_crop_acc']:.4f}`",
         f"- active_two_pass_acc: `{summary['active_two_pass_acc']:.4f}`",
         f"- active_crop_usage_rate: `{summary['active_crop_usage_rate']:.4f}`",
+        f"- strict_zoom_satisfied_rate: `{summary['strict_zoom_satisfied_rate']:.4f}`",
         f"- avg_active_reward_score: `{summary['average_active_reward_score']:.4f}`",
         f"- delta_active_vs_baseline: `{summary['active_minus_baseline']:.4f}`",
         f"- delta_oracle_vs_baseline: `{summary['oracle_minus_baseline']:.4f}`",
+        f"- tool_status_counts: `{json.dumps(summary['tool_status_counts'], sort_keys=True)}`",
         "",
     ]
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -341,7 +294,19 @@ def main() -> None:
     parser.add_argument("--output-dir", default="reports/active_benchmark")
     parser.add_argument("--dataset-dir", default="data/benchmark_synth")
     parser.add_argument("--active-strategy", choices=["default", "strict_zoom"], default="default")
+    parser.add_argument("--allow-busy-gpu", action="store_true")
     args = parser.parse_args()
+
+    require_idle_gpus(
+        purpose="benchmark_active_vision",
+        required_count=1,
+        allow_busy=args.allow_busy_gpu,
+    )
+    require_dependencies(
+        ["torch", "transformers", "PIL"],
+        purpose="benchmark_active_vision",
+        install_hint="pip install -e .[bench]",
+    )
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

@@ -5,6 +5,7 @@ import argparse
 import json
 import statistics
 import time
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,9 +13,13 @@ from typing import Any
 import torch
 from PIL import Image
 
+from active_perception_r1.bench.protocol import (
+    crop_from_bbox,
+    run_active_default,
+    run_active_strict_zoom,
+)
 from active_perception_r1.rewards.active_vision_reward import compute_score, extract_final_answer, normalize_answer
-from active_perception_r1.sim.live_reinjection import run_live_reinjection_episode
-from active_perception_r1.utils.trace_parser import parse_reasoning_trace
+from active_perception_r1.utils.preflight import require_dependencies, require_idle_gpus
 
 
 @dataclass
@@ -168,72 +173,12 @@ class VisionBenchModel:
                 **inputs,
                 max_new_tokens=self.max_new_tokens,
                 do_sample=False,
-                temperature=0.0,
             )
 
         input_len = inputs["input_ids"].shape[1]
         completion_ids = generated[:, input_len:]
         text_out = self.processor.batch_decode(completion_ids, skip_special_tokens=True)[0]
         return text_out.strip()
-
-
-def crop_from_bbox(image: Image.Image, bbox_norm: tuple[float, float, float, float]) -> Image.Image:
-    w, h = image.size
-    x0 = max(0, min(w, int(round(bbox_norm[0] * w))))
-    y0 = max(0, min(h, int(round(bbox_norm[1] * h))))
-    x1 = max(x0 + 1, min(w, int(round(bbox_norm[2] * w))))
-    y1 = max(y0 + 1, min(h, int(round(bbox_norm[3] * h))))
-    return image.crop((x0, y0, x1, y1))
-
-
-def crop_from_zoom_trace(image: Image.Image, response: str) -> Image.Image | None:
-    parsed = parse_reasoning_trace(response)
-    for candidate in parsed.zoom_calls:
-        if candidate.is_well_formed():
-            x0, y0, x1, y1 = candidate.to_normalized_bbox(image.width, image.height)
-            return crop_from_bbox(image, (x0, y0, x1, y1))
-    return None
-
-
-def _run_active_default(model: VisionBenchModel, image: Image.Image, question: str) -> tuple[str, str, bool]:
-    prompt = (
-        f"Question: {question}\n"
-        "Think step by step. If visual detail is needed, use <zoom_roi x0=\"...\" y0=\"...\" x1=\"...\" y1=\"...\" />. "
-        "Then answer in <answer>...</answer>."
-    )
-    live_result = run_live_reinjection_episode(
-        image=image,
-        task_text=prompt,
-        generator=model.generate,
-        max_steps=3,
-    )
-    first = live_result.steps[0].response if live_result.steps else ""
-    return first, live_result.final_response, live_result.used_zoom_count > 0
-
-
-def _run_active_strict(model: VisionBenchModel, image: Image.Image, question: str) -> tuple[str, str, bool]:
-    zoom_prompt = (
-        f"Question: {question}\n"
-        "Output ONLY one valid zoom tag and nothing else: "
-        "<zoom_roi x0=\"0.00\" y0=\"0.00\" x1=\"1.00\" y1=\"1.00\" />"
-    )
-    zoom_response = model.generate([image], zoom_prompt)
-    crop = crop_from_zoom_trace(image, zoom_response)
-
-    if crop is None:
-        retry = "Output ONLY a valid zoom tag in the same format."
-        zoom_response = model.generate([image], retry)
-        crop = crop_from_zoom_trace(image, zoom_response)
-
-    if crop is None:
-        answer_only = model.generate([image], f"Question: {question}\nReturn only <answer>...</answer>.")
-        return zoom_response, answer_only, False
-
-    answer = model.generate(
-        [image, crop],
-        f"Question: {question}\nUse the crop for evidence and answer only in <answer>...</answer>.",
-    )
-    return zoom_response, answer, True
 
 
 def run_one_example(model: VisionBenchModel, ex: DocVqaExample, strategy: str) -> dict[str, Any]:
@@ -254,15 +199,36 @@ def run_one_example(model: VisionBenchModel, ex: DocVqaExample, strategy: str) -
         )
 
     if strategy == "strict_zoom":
-        active_first, active_final, used_crop = _run_active_strict(model, image, ex.question)
+        active_run = run_active_strict_zoom(
+            image=image,
+            generator=model.generate,
+            zoom_prompt=(
+                f"Question: {ex.question}\n"
+                "Output ONLY one valid zoom tag and nothing else: "
+                "<zoom_roi x0=\"0.00\" y0=\"0.00\" x1=\"1.00\" y1=\"1.00\" />"
+            ),
+            retry_prompt="Output ONLY a valid zoom tag in the same format.",
+            answer_prompt=(
+                f"Question: {ex.question}\n"
+                "Use the crop for evidence and answer only in <answer>...</answer>."
+            ),
+        )
     else:
-        active_first, active_final, used_crop = _run_active_default(model, image, ex.question)
+        active_run = run_active_default(
+            image=image,
+            task_text=(
+                f"Question: {ex.question}\n"
+                "Think step by step. If visual detail is needed, use <zoom_roi x0=\"...\" y0=\"...\" x1=\"...\" y1=\"...\" />. "
+                "Then answer in <answer>...</answer>."
+            ),
+            generator=model.generate,
+            max_steps=3,
+        )
 
     normalized_aliases = {normalize_answer(item) for item in [ex.answer, *ex.answer_aliases] if item}
-    gt_norm = normalize_answer(ex.answer)
     baseline_pred = normalize_answer(extract_final_answer(baseline_response))
     oracle_pred = normalize_answer(extract_final_answer(oracle_response))
-    active_pred = normalize_answer(extract_final_answer(active_final))
+    active_pred = normalize_answer(extract_final_answer(active_run.final_response))
 
     baseline_acc = float(baseline_pred in normalized_aliases)
     oracle_acc = float(oracle_pred in normalized_aliases)
@@ -278,7 +244,7 @@ def run_one_example(model: VisionBenchModel, ex: DocVqaExample, strategy: str) -
 
     reward = compute_score(
         data_source="docvqa_active_perception",
-        solution_str=f"{active_first}\n{active_final}",
+        solution_str=active_run.scoring_trace,
         ground_truth=ex.answer,
         extra_info=extra_info,
     )
@@ -288,9 +254,12 @@ def run_one_example(model: VisionBenchModel, ex: DocVqaExample, strategy: str) -
         "baseline_acc": baseline_acc,
         "oracle_acc": oracle_acc,
         "active_acc": active_acc,
-        "active_used_crop": bool(used_crop),
+        "active_used_crop": bool(active_run.used_crop),
         "has_bbox": bool(ex.bbox_norm is not None),
         "active_reward": float(reward["score"]),
+        "tool_status": active_run.tool_status,
+        "tool_retry_count": active_run.tool_retry_count,
+        "strict_zoom_satisfied": active_run.strict_zoom_satisfied,
     }
 
 
@@ -301,6 +270,8 @@ def summarize(rows: list[dict[str, Any]], model_id: str, strategy: str, split: s
     crop_usage = statistics.mean(float(r["active_used_crop"]) for r in rows) if rows else 0.0
     bbox_coverage = statistics.mean(float(r["has_bbox"]) for r in rows) if rows else 0.0
     reward_mean = statistics.mean(r["active_reward"] for r in rows) if rows else 0.0
+    strict_satisfied = statistics.mean(float(r["strict_zoom_satisfied"]) for r in rows) if rows else 0.0
+    tool_status_counts = dict(Counter(r["tool_status"] for r in rows)) if rows else {}
 
     return {
         "model_id": model_id,
@@ -313,10 +284,12 @@ def summarize(rows: list[dict[str, Any]], model_id: str, strategy: str, split: s
         "oracle_acc": oracle,
         "active_acc": active,
         "active_crop_usage": crop_usage,
+        "strict_zoom_satisfied": strict_satisfied,
         "bbox_coverage": bbox_coverage,
         "active_reward_mean": reward_mean,
         "active_minus_baseline": active - baseline,
         "oracle_minus_baseline": oracle - baseline,
+        "tool_status_counts": tool_status_counts,
     }
 
 
@@ -326,13 +299,13 @@ def render_markdown(run_summaries: list[dict[str, Any]], output_path: Path) -> N
         "",
         "Benchmark on `nielsr/docvqa_1200_examples` with active-perception strategies.",
         "",
-        "| Model | Strategy | Samples | Baseline | Active | Active-Baseline | Oracle | Crop Usage |",
-        "|---|---|---:|---:|---:|---:|---:|---:|",
+        "| Model | Strategy | Samples | Baseline | Active | Active-Baseline | Oracle | Crop Usage | Strict Zoom Satisfied | Tool Status Counts |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
 
     for row in run_summaries:
         lines.append(
-            "| {model} | {strategy} | {samples} | {baseline:.4f} | {active:.4f} | {delta:.4f} | {oracle:.4f} | {crop:.4f} |".format(
+            "| {model} | {strategy} | {samples} | {baseline:.4f} | {active:.4f} | {delta:.4f} | {oracle:.4f} | {crop:.4f} | {strict:.4f} | `{status_counts}` |".format(
                 model=row["model_id"],
                 strategy=row["strategy"],
                 samples=row["samples"],
@@ -341,6 +314,8 @@ def render_markdown(run_summaries: list[dict[str, Any]], output_path: Path) -> N
                 delta=row["active_minus_baseline"],
                 oracle=row["oracle_acc"],
                 crop=row["active_crop_usage"],
+                strict=row.get("strict_zoom_satisfied", 0.0),
+                status_counts=json.dumps(row.get("tool_status_counts", {}), sort_keys=True),
             )
         )
 
@@ -356,7 +331,19 @@ def main() -> None:
     parser.add_argument("--split", default="test")
     parser.add_argument("--max-new-tokens", type=int, default=48)
     parser.add_argument("--output-dir", default="reports/real_benchmark")
+    parser.add_argument("--allow-busy-gpu", action="store_true")
     args = parser.parse_args()
+
+    require_idle_gpus(
+        purpose="benchmark_docvqa_suite",
+        required_count=1,
+        allow_busy=args.allow_busy_gpu,
+    )
+    require_dependencies(
+        ["torch", "transformers", "datasets", "PIL"],
+        purpose="benchmark_docvqa_suite",
+        install_hint="pip install -e .[bench]",
+    )
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -384,10 +371,12 @@ def main() -> None:
                     "oracle_acc": 0.0,
                     "active_acc": 0.0,
                     "active_crop_usage": 0.0,
+                    "strict_zoom_satisfied": 0.0,
                     "bbox_coverage": 0.0,
                     "active_reward_mean": 0.0,
                     "active_minus_baseline": 0.0,
                     "oracle_minus_baseline": 0.0,
+                    "tool_status_counts": {},
                     "error": f"{type(error).__name__}: {error}",
                 }
             )
@@ -438,10 +427,11 @@ def main() -> None:
             print(f"LOAD_ERROR {item['model_id']}: {item.get('error')}")
         else:
             print(
-                f"{item['model_id']} [{item['strategy']}] samples={item['samples']} "
-                f"baseline={item['baseline_acc']:.4f} active={item['active_acc']:.4f} "
-                f"delta={item['active_minus_baseline']:.4f} crop={item['active_crop_usage']:.4f}"
-            )
+                    f"{item['model_id']} [{item['strategy']}] samples={item['samples']} "
+                    f"baseline={item['baseline_acc']:.4f} active={item['active_acc']:.4f} "
+                    f"delta={item['active_minus_baseline']:.4f} crop={item['active_crop_usage']:.4f} "
+                    f"strict={item.get('strict_zoom_satisfied', 0.0):.4f}"
+                )
 
 
 if __name__ == "__main__":
