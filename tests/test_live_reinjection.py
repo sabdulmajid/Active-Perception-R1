@@ -35,6 +35,33 @@ class LiveReinjectionTests(unittest.TestCase):
         self.assertEqual(calls[0][0], 1)
         self.assertEqual(calls[1][0], 2)
 
+    def test_zoom_takes_precedence_over_inline_answer(self) -> None:
+        image = Image.new("RGB", (200, 100), color=(255, 255, 255))
+        calls: list[int] = []
+
+        def fake_generator(images, text):
+            calls.append(len(images))
+            if len(calls) == 1:
+                return (
+                    "<think>I should zoom before trusting the answer "
+                    "<zoom_roi x0=\"0.2\" y0=\"0.1\" x1=\"0.8\" y1=\"0.7\" />"
+                    "</think>\n"
+                    "<answer>premature</answer>"
+                )
+            return "<answer>42</answer>"
+
+        result = run_live_reinjection_episode(
+            image=image,
+            task_text="Read the value",
+            generator=fake_generator,
+            max_steps=3,
+        )
+
+        self.assertEqual(result.final_response, "<answer>42</answer>")
+        self.assertEqual(result.used_zoom_count, 1)
+        self.assertEqual(len(result.steps), 2)
+        self.assertEqual(calls, [1, 2])
+
     def test_stops_when_no_zoom_or_answer(self) -> None:
         image = Image.new("RGB", (200, 100), color=(255, 255, 255))
 

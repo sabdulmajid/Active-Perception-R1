@@ -54,22 +54,23 @@ def run_live_reinjection_episode(
         response = generator(images, conversation)
         parsed = parse_reasoning_trace(response)
 
-        if "<answer>" in response.lower() and "</answer>" in response.lower():
-            steps.append(LiveStepRecord(step_index=step, response=response, used_zoom=False, observation_token=None))
-            return LiveEpisodeResult(final_response=response, steps=steps, used_zoom_count=sum(int(s.used_zoom) for s in steps))
-
         zoom_call = None
         for candidate in parsed.zoom_calls:
             if candidate.is_well_formed():
                 zoom_call = candidate
                 break
 
+        if zoom_call is None and "<answer>" in response.lower() and "</answer>" in response.lower():
+            steps.append(LiveStepRecord(step_index=step, response=response, used_zoom=False, observation_token=None))
+            return LiveEpisodeResult(final_response=response, steps=steps, used_zoom_count=sum(int(s.used_zoom) for s in steps))
+
         if zoom_call is None:
             steps.append(LiveStepRecord(step_index=step, response=response, used_zoom=False, observation_token=None))
             return LiveEpisodeResult(final_response=response, steps=steps, used_zoom_count=sum(int(s.used_zoom) for s in steps))
 
-        x0, y0, x1, y1 = zoom_call.to_normalized_bbox(image.width, image.height)
-        crop = _crop_from_zoom(image, x0, y0, x1, y1)
+        source_image = images[-1]
+        x0, y0, x1, y1 = zoom_call.to_normalized_bbox(source_image.width, source_image.height)
+        crop = _crop_from_zoom(source_image, x0, y0, x1, y1)
         images.append(crop)
 
         observation_token = (

@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.metadata as importlib_metadata
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from typing import Any, Callable
+
+try:
+    from packaging.requirements import Requirement
+except Exception:  # pragma: no cover - packaging is expected in normal installs
+    Requirement = None
 
 
 @dataclass(frozen=True)
@@ -23,6 +30,22 @@ class DependencyStatus:
     ok: bool
     version: str | None
     error: str | None
+
+
+def _probe_vllm_runtime() -> Any:
+    from vllm import LLM
+
+    return LLM
+
+
+KNOWN_IMPORT_PROBES: dict[str, Callable[[], Any]] = {
+    "vllm": _probe_vllm_runtime,
+}
+
+KNOWN_COMPATIBILITY_REQUIREMENTS: dict[str, set[str]] = {
+    "verl": {"vllm"},
+    "vllm": {"torch", "torchaudio", "torchvision", "transformers"},
+}
 
 
 def parse_gpu_status_csv(text: str) -> list[GPUStatus]:
@@ -113,18 +136,33 @@ def inspect_dependencies(
     modules: list[str],
     *,
     import_fn=importlib.import_module,
+    probe_fns: dict[str, Callable[[], Any]] | None = None,
+    distribution_fn=importlib_metadata.distribution,
+    version_fn=importlib_metadata.version,
 ) -> list[DependencyStatus]:
+    probe_fns = probe_fns or KNOWN_IMPORT_PROBES
     statuses: list[DependencyStatus] = []
     for module_name in modules:
         try:
-            module = import_fn(module_name)
+            probe = probe_fns.get(module_name)
+            if probe is not None:
+                module = probe()
+            else:
+                module = import_fn(module_name)
         except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            if module_name == "vllm" and "undefined symbol" in str(exc):
+                error += (
+                    ". This usually indicates a torch/vllm ABI mismatch. "
+                    "For verl 0.7.1, use a vllm release in verl's supported window "
+                    "(<=0.12.0) with its matching torch/torchaudio/torchvision pins."
+                )
             statuses.append(
                 DependencyStatus(
                     module=module_name,
                     ok=False,
                     version=None,
-                    error=f"{type(exc).__name__}: {exc}",
+                    error=error,
                 )
             )
             continue
@@ -136,6 +174,61 @@ def inspect_dependencies(
                 error=None,
             )
         )
+
+    imported_modules = {status.module for status in statuses if status.ok}
+    statuses.extend(
+        inspect_declared_compatibility(
+            imported_modules,
+            distribution_fn=distribution_fn,
+            version_fn=version_fn,
+        )
+    )
+    return statuses
+
+
+def inspect_declared_compatibility(
+    modules: set[str],
+    *,
+    distribution_fn=importlib_metadata.distribution,
+    version_fn=importlib_metadata.version,
+) -> list[DependencyStatus]:
+    if Requirement is None:
+        return []
+
+    statuses: list[DependencyStatus] = []
+    for owner_module, required_modules in KNOWN_COMPATIBILITY_REQUIREMENTS.items():
+        if owner_module not in modules:
+            continue
+
+        try:
+            distribution = distribution_fn(owner_module)
+        except importlib_metadata.PackageNotFoundError:
+            continue
+
+        for raw_requirement in distribution.requires or []:
+            requirement = Requirement(raw_requirement)
+            if requirement.marker is not None and not requirement.marker.evaluate():
+                continue
+            if requirement.name not in required_modules or requirement.name not in modules:
+                continue
+
+            try:
+                installed_version = version_fn(requirement.name)
+            except importlib_metadata.PackageNotFoundError:
+                continue
+
+            if requirement.specifier and not requirement.specifier.contains(installed_version, prereleases=True):
+                statuses.append(
+                    DependencyStatus(
+                        module=f"{owner_module}->{requirement.name}",
+                        ok=False,
+                        version=installed_version,
+                        error=(
+                            f"Installed {requirement.name} {installed_version} does not satisfy "
+                            f"{owner_module} requirement `{raw_requirement}`."
+                        ),
+                    )
+                )
     return statuses
 
 

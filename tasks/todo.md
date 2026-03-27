@@ -145,7 +145,17 @@
 - [x] Add script-level tests for strict-mode semantics and GPU/dependency preflight parsing.
 - [x] Update README install and benchmark sections to reflect the new preflight behavior and honest benchmark interpretation.
 - [x] Verify with local unit tests and shell checks; only run GPU experiments if both GPUs are sufficiently idle.
-- [ ] Commit and push the curated hardening changes.
+- [x] Commit and push the curated hardening changes.
+
+## Implementation Slice — 2026-03-27 (Honest GPU Validation)
+
+- [x] Fix live reinjection so valid zoom actions take precedence over inline answers in the same model response.
+- [x] Re-run the local test suite after the reinjection fix.
+- [x] Re-check GPU occupancy immediately before each benchmark or training run.
+- [x] Run a hardened synthetic benchmark on a mainstream VLM to verify strict-mode reporting.
+- [x] Run a hardened DocVQA benchmark on at least one stronger Qwen model to produce a first honest post-hardening report.
+- [x] Attempt a minimal GRPO smoke launch with the local training vendor environment if GPUs remain idle.
+- [x] Record results and limitations in the task log, then commit and push.
 
 ## Review Notes — Architecture Assessment 2026-03-27
 
@@ -176,3 +186,30 @@
 - Deliberately did not re-run real benchmarks in this pass because GPU state was not clean enough for a non-contentious experiment:
 	- at verification time only `1/2` GPUs was idle
 	- the new preflight guard is intended to enforce that discipline
+
+## Review Notes — Honest GPU Validation 2026-03-27
+
+- Re-checked GPU occupancy with `nvidia-smi` immediately before each benchmark and smoke-training launch; both RTX Pro 6000 GPUs were idle during the 2026-03-27 validation runs.
+- Fixed `src/active_perception_r1/sim/live_reinjection.py` so a valid `<zoom_roi .../>` takes precedence over an inline `<answer>` in the same response, and later zooms crop the most recent view instead of always recropping the original image.
+- Added `tests/test_live_reinjection.py::test_zoom_takes_precedence_over_inline_answer`; local unit verification now passes `23/23`.
+- Added `src/active_perception_r1/utils/dataset_schema.py` and wired the train launcher to auto-disable `data.image_key` when parquet prompts already contain structured image content. This prevents the sample active-vision parquet from being filtered down to zero rows by verl's image accounting.
+- Hardened synthetic benchmark rerun (`Qwen/Qwen2.5-VL-3B-Instruct`, `strict_zoom`, `n=24`) produced:
+	- baseline `1.0000`
+	- active `1.0000`
+	- oracle crop `0.9167`
+	- crop usage `1.0000`
+	- strict zoom satisfied `1.0000`
+- Hardened real DocVQA rerun (`Qwen/Qwen2.5-VL-3B-Instruct`, `n=16`, seed `29`) produced:
+	- `default`: baseline `0.7500`, active `0.1875`, delta `-0.5625`
+	- `strict_zoom`: baseline `0.7500`, active `0.1250`, delta `-0.6250`
+	- `strict_zoom` crop usage / satisfaction `0.1250`
+- Honest interpretation: the old near-parity `strict_zoom` story was benchmark fallback inflation; with fail-closed strict mode, current active prompting is substantially worse than baseline on real DocVQA.
+- Minimal GRPO smoke-launch progression:
+	- initial local vendor environment lacked `accelerate` and `gguf`
+	- after filling those gaps, launcher reached dataset loading and exposed a verl schema mismatch that dropped all rows
+	- after dataset-schema resolution, launcher reached worker startup, FSDP init, and Qwen2.5-VL model construction
+	- final blocker is now binary compatibility in the local rollout stack: installed `vllm 0.18.0` is outside `verl 0.7.1`'s declared support window and its wheel expects a different `torch` ABI than the currently installed `torch 2.7.0+cu128`
+- Follow-up remediation landed in this pass:
+	- train dependencies are now pinned to a supported `verl==0.7.1` / `vllm==0.12.0` / `torch==2.9.0` stack with `transformers<5`
+	- preflight now performs a deeper `vllm` runtime import and metadata-level compatibility checks so this class of failure is caught before a long Ray/FSDP startup
+	- direct validation: `PYTHONPATH=src:.vendor_train:.vendor python3 -m active_perception_r1.utils.preflight ...` now fails immediately with a targeted ABI-mismatch error instead of failing deep inside Ray worker initialization

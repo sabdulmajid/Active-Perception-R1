@@ -23,7 +23,7 @@ VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-16}"
 MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-2048}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-1536}"
 N_RESPONSES="${N_RESPONSES:-4}"
-IMAGE_KEY="${IMAGE_KEY-images}"
+IMAGE_KEY="${IMAGE_KEY:-images}"
 PPO_MINI_BATCH_SIZE="${PPO_MINI_BATCH_SIZE:-32}"
 PPO_MICRO_BATCH_SIZE_PER_GPU="${PPO_MICRO_BATCH_SIZE_PER_GPU:-1}"
 ACTOR_MAX_TOKEN_LEN_PER_GPU="${ACTOR_MAX_TOKEN_LEN_PER_GPU:-8192}"
@@ -54,7 +54,7 @@ fi
 PREFLIGHT_ARGS=(
   --purpose "grpo_training"
   --required-gpus "${N_GPUS_PER_NODE}"
-  --modules "torch,verl,vllm,pybase64,ray"
+  --modules "torch,torchaudio,torchvision,transformers,verl,vllm,pybase64,ray,accelerate,gguf"
   --install-hint "pip install -e .[train]"
 )
 
@@ -63,6 +63,13 @@ if [[ "${ALLOW_BUSY_GPU}" == "1" ]]; then
 fi
 
 python3 -m active_perception_r1.utils.preflight "${PREFLIGHT_ARGS[@]}"
+
+RESOLVED_IMAGE_KEY="$(
+  python3 -m active_perception_r1.utils.dataset_schema \
+    --parquet-path "${TRAIN_FILE}" \
+    --prompt-key "prompt" \
+    --requested-image-key "${IMAGE_KEY}"
+)"
 
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
@@ -80,7 +87,7 @@ python3 -m verl.trainer.main_ppo \
   data.max_response_length="${MAX_RESPONSE_LENGTH}" \
   data.filter_overlong_prompts=True \
   data.truncation=error \
-  ${IMAGE_KEY:+data.image_key="${IMAGE_KEY}"} \
+  data.image_key="${RESOLVED_IMAGE_KEY}" \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
   +actor_rollout_ref.model.override_config.attn_implementation="${ATTN_IMPLEMENTATION}" \
   actor_rollout_ref.model.use_remove_padding=True \

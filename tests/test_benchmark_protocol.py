@@ -5,7 +5,13 @@ import unittest
 from PIL import Image
 
 from active_perception_r1.bench.protocol import STRICT_ZOOM_FAILURE_ANSWER, run_active_default, run_active_strict_zoom
-from active_perception_r1.utils.preflight import find_busy_gpus, inspect_dependencies, parse_gpu_status_csv, require_idle_gpus
+from active_perception_r1.utils.preflight import (
+    find_busy_gpus,
+    inspect_declared_compatibility,
+    inspect_dependencies,
+    parse_gpu_status_csv,
+    require_idle_gpus,
+)
 
 
 class BenchmarkProtocolTests(unittest.TestCase):
@@ -128,6 +134,49 @@ class PreflightTests(unittest.TestCase):
         statuses = inspect_dependencies(["ok_mod", "missing_mod"], import_fn=fake_import)
         self.assertTrue(statuses[0].ok)
         self.assertFalse(statuses[1].ok)
+
+    def test_inspect_dependencies_uses_probe_for_vllm_runtime_failures(self) -> None:
+        def fake_import(name: str):
+            raise AssertionError(f"unexpected import path for {name}")
+
+        def fake_probe():
+            raise ImportError("undefined symbol: bad_vllm_binary")
+
+        statuses = inspect_dependencies(
+            ["vllm"],
+            import_fn=fake_import,
+            probe_fns={"vllm": fake_probe},
+        )
+
+        self.assertEqual(len(statuses), 1)
+        self.assertFalse(statuses[0].ok)
+        self.assertIn("ABI mismatch", statuses[0].error)
+
+    def test_inspect_declared_compatibility_reports_version_mismatches(self) -> None:
+        class FakeDistribution:
+            requires = [
+                "torch==2.9.0",
+                "transformers<5,>=4.56.0",
+            ]
+
+        def fake_distribution(name: str):
+            if name == "vllm":
+                return FakeDistribution()
+            raise RuntimeError(f"unexpected distribution lookup: {name}")
+
+        versions = {
+            "torch": "2.7.0+cu128",
+            "transformers": "5.3.0",
+        }
+
+        statuses = inspect_declared_compatibility(
+            {"vllm", "torch", "transformers"},
+            distribution_fn=fake_distribution,
+            version_fn=versions.__getitem__,
+        )
+
+        self.assertEqual([status.module for status in statuses], ["vllm->torch", "vllm->transformers"])
+        self.assertTrue(all(not status.ok for status in statuses))
 
 
 if __name__ == "__main__":

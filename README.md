@@ -55,6 +55,23 @@ The code now distinguishes:
 
 Any new benchmark intended for publication should be re-run with the hardened scripts in this commit.
 
+## First post-hardening spot checks (2026-03-27)
+
+These are the first honest reruns after strict-mode fail-closed hardening.
+
+- Synthetic sanity check (`Qwen/Qwen2.5-VL-3B-Instruct`, `strict_zoom`, `n=24`):
+  - baseline `1.0000`
+  - active `1.0000`
+  - oracle crop `0.9167`
+  - crop usage `1.0000`
+  - strict zoom satisfied `1.0000`
+- Real DocVQA spot check (`Qwen/Qwen2.5-VL-3B-Instruct`, `n=16`, seed `29`):
+  - `default`: baseline `0.7500`, active `0.1875`, delta `-0.5625`
+  - `strict_zoom`: baseline `0.7500`, active `0.1250`, delta `-0.6250`
+  - `strict_zoom` crop usage / satisfaction: `0.1250`
+
+Interpretation: once strict mode actually fails closed, the current prompt-level zoom policy is materially worse than baseline on real DocVQA. That is the honest result, and it means the next major investment should be true multi-turn tool execution in training rather than more benchmark prompt tuning.
+
 ## Exploratory results (real data, pre-hardening protocol)
 
 Dataset: `nielsr/docvqa_1200_examples` (DocVQA test split)
@@ -146,6 +163,8 @@ Use this project if you are:
 pip install -e .[bench]
 ```
 
+For training, use a fresh environment. The `train` extra intentionally pins a tested `verl` / `vllm` / `torch` stack because mixing arbitrary CUDA wheel versions is the fastest way to get runtime ABI failures.
+
 ### 2) Validate core logic
 
 ```bash
@@ -176,6 +195,8 @@ TRAIN_BATCH_SIZE=8 \
 VAL_BATCH_SIZE=8 \
 ./scripts/train_grpo_active_vision.sh
 ```
+
+The train preflight now does a deeper runtime check for `vllm` and will fail early on broken binary stacks such as mismatched `torch` / `vllm` wheels. The supported launcher pins in this repo are currently centered on `verl==0.7.1`, `vllm==0.12.0`, `torch==2.9.0`, `torchaudio==2.9.0`, `torchvision==0.24.0`, and `transformers<5`.
 
 ## Scoring behavior
 
