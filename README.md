@@ -201,6 +201,17 @@ The train preflight now does a deeper runtime check for `vllm` and will fail ear
 
 The launcher now enables verl multi-turn rollout with the repo-local agent config at [configs/agent_loop/active_perception_zoom_agent.yaml](configs/agent_loop/active_perception_zoom_agent.yaml). The model emits `<zoom_roi .../>`, the agent loop executes the crop, reinjects the crop plus observation token, and the reward function scores the executed trace directly when that metadata is present.
 
+For Qwen2.x-VL launch stability, the script now applies a conservative training profile by default:
+
+- `USE_FUSED_KERNELS=0`
+- `ACTOR_USE_TORCH_COMPILE=0`
+- `ACTOR_FSDP_USE_TORCH_COMPILE=0`
+- `REF_USE_TORCH_COMPILE=0`
+- `REF_FSDP_USE_TORCH_COMPILE=0`
+- `ROLLOUT_GPU_MEMORY_UTILIZATION=0.45`
+
+Those defaults are intended to avoid the current Qwen2.x-VL old-log-prob and colocated-rollout failure modes seen on this workstation. If you have a cleaner upstream stack or more headroom, you can still override them explicitly from the shell.
+
 ## Scoring behavior
 
 - Correct answer + relevant zoom: positive reward

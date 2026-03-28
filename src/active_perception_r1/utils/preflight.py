@@ -9,6 +9,11 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from active_perception_r1.utils.python_dev_headers import (
+    PythonDevHeaderStatus,
+    inspect_python_dev_headers,
+)
+
 try:
     from packaging.requirements import Requirement
 except Exception:  # pragma: no cover - packaging is expected in normal installs
@@ -249,6 +254,23 @@ def require_dependencies(
     return statuses
 
 
+def require_python_dev_headers(
+    *,
+    purpose: str,
+    env: dict[str, str] | None = None,
+    system_include_dir: str | None = None,
+) -> PythonDevHeaderStatus:
+    status = inspect_python_dev_headers(env=env, system_include_dir=system_include_dir)
+    if status is None:
+        raise RuntimeError(
+            f"Missing Python development headers for {purpose}. Triton/vLLM helper compilation requires `Python.h`, "
+            "but it was not found in the interpreter include directory or current compiler include paths. "
+            "Set `CPATH`/`C_INCLUDE_PATH` to a valid Python include directory or provide a vendored "
+            "`libpythonX.Y-dev` package under `.vendor_runtime/`."
+        )
+    return status
+
+
 def _main() -> int:
     parser = argparse.ArgumentParser(description="Preflight checks for active-perception scripts.")
     parser.add_argument("--purpose", default="run")
@@ -265,6 +287,11 @@ def _main() -> int:
         "--install-hint",
         default="pip install -e .",
         help="Installation command shown when module checks fail.",
+    )
+    parser.add_argument(
+        "--require-python-dev-headers",
+        action="store_true",
+        help="Verify that `Python.h` is available to compiler subprocesses before launch.",
     )
     args = parser.parse_args()
 
@@ -283,6 +310,9 @@ def _main() -> int:
             purpose=args.purpose,
             install_hint=args.install_hint,
         )
+
+    if args.require_python_dev_headers:
+        require_python_dev_headers(purpose=args.purpose)
 
     return 0
 

@@ -109,6 +109,25 @@ class FakeDataset:
         return images, None
 
 
+class StrictFakeDataset(FakeDataset):
+    @staticmethod
+    async def process_vision_info(messages, image_patch_size, config):
+        for message in messages:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text":
+                    if "image" in item:
+                        raise AssertionError("text content still carries an image field")
+                if item.get("type") == "image":
+                    if "text" in item:
+                        raise AssertionError("image content still carries a text field")
+        return await FakeDataset.process_vision_info(messages, image_patch_size, config)
+
+
 class FakeTokenOutput:
     def __init__(self, token_ids: list[int]) -> None:
         self.token_ids = token_ids
@@ -235,6 +254,77 @@ class ActivePerceptionAgentLoopTests(unittest.TestCase):
         self.assertIn('matched_region="target"', output.extra_fields["executed_observation_tokens"][0])
         self.assertIn("<answer>42</answer>", tokenizer.decode(output.response_ids))
         self.assertIn(0, output.response_mask)
+
+    def test_agent_normalizes_parquet_style_multimodal_rows(self) -> None:
+        tokenizer = FakeTokenizer()
+        processor = FakeProcessor()
+        trainer_config = SimpleNamespace(
+            config=AttrDict(
+                {
+                    "actor_rollout_ref": AttrDict(
+                        {
+                            "rollout": AttrDict(
+                                {
+                                    "prompt_length": 4096,
+                                    "response_length": 4096,
+                                    "multi_turn": AttrDict(
+                                        {
+                                            "max_user_turns": 3,
+                                            "max_assistant_turns": 4,
+                                            "max_parallel_calls": 1,
+                                            "max_tool_response_length": 256,
+                                            "tool_response_truncate_side": "middle",
+                                            "tool_config_path": None,
+                                            "format": "hermes",
+                                            "interaction_config_path": None,
+                                        }
+                                    ),
+                                }
+                            ),
+                            "model": AttrDict({}),
+                        }
+                    )
+                }
+            )
+        )
+        data_config = SimpleNamespace(config=AttrDict({}))
+        initial_image = Image.new("RGB", (600, 600), color="white")
+        server = FakeServerManager(tokenizer, responses=["<answer>42</answer>"])
+
+        async def run_agent():
+            agent = ActivePerceptionZoomAgentLoop(
+                trainer_config=trainer_config,
+                server_manager=server,
+                tokenizer=tokenizer,
+                processor=processor,
+                dataset_cls=StrictFakeDataset,
+                data_config=data_config,
+                max_zoom_calls=3,
+                min_relative_area=0.02,
+                max_relative_area=0.65,
+            )
+            return await agent.run(
+                sampling_params={},
+                raw_prompt=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "image": initial_image, "text": None},
+                            {
+                                "type": "text",
+                                "text": "Read the inset value.",
+                                "image": None,
+                            },
+                        ],
+                    }
+                ],
+                extra_info={"image_size": {"width": 600, "height": 600}},
+            )
+
+        output = asyncio.run(run_agent())
+
+        self.assertEqual(len(output.multi_modal_data["images"]), 1)
+        self.assertIn("<answer>42</answer>", tokenizer.decode(output.response_ids))
 
 
 if __name__ == "__main__":

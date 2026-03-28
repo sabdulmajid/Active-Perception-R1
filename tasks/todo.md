@@ -1,5 +1,16 @@
 # Active-Perception-R1 Task Plan
 
+## Implementation Slice — 2026-03-28 (Runtime Header Fallback + Production Validation)
+
+- [x] Add a deterministic Python dev-header fallback so Triton/vLLM helper compilation does not depend on broken system includes.
+- [x] Integrate the header fallback into the GRPO launcher and fail fast in preflight when `Python.h` is still unavailable.
+- [x] Add unit tests for header resolution/preflight behavior and re-run the local verification suite.
+- [x] Re-check GPU occupancy immediately before the next smoke-training launch.
+- [x] Re-run a constrained multi-turn GRPO smoke test and capture the first end-to-end result or next blocker precisely.
+- [x] Re-check GPU occupancy immediately before real-world benchmark runs.
+- [ ] Re-run hardened real-data benchmarks and record current impact with the productionized path.
+- [x] Update task logs/documentation with results, then commit and push the curated changes.
+
 ## Continuation — 2026-03-23 (Session Hardening)
 
 - [x] Identify a concrete implementation slice that improves real verl training robustness.
@@ -227,6 +238,26 @@
 ## Review Notes — True Multi-Turn Rollout 2026-03-27
 
 - Added `src/active_perception_r1/rollout/active_perception_agent.py`, a repo-local verl agent loop that executes `<zoom_roi .../>` actions during rollout instead of only parsing them post hoc in the reward function.
+
+## Review Notes — Runtime Bring-Up 2026-03-28
+
+- Added a vendored Python-dev-header resolver and wired it into the train launcher so Triton / torch-inductor helper builds no longer depend on broken system `Python.h` paths.
+- Added runtime sanitization for parquet-style multimodal rows and an agent-loop parquet preparer so verl no longer drops or crashes on the repo sample dataset.
+- Added a lazy `sitecustomize` patch for `verl.utils.attention_utils` so missing `flash_attn.bert_padding` no longer aborts the training stack at import time.
+- Current smoke-run status:
+  - validation now completes on the true multi-turn rollout path
+  - the first remaining actor-side failure on Qwen2.5-VL was a `CUBLAS_STATUS_EXECUTION_FAILED` in old-log-prob computation
+  - disabling the correct engine-level `use_torch_compile` flags changes that failure mode from rotary-embedding crash to rollout-memory pressure, which is progress
+- New train-profile hardening landed in this session:
+  - model-aware default recommendations now live in `src/active_perception_r1/utils/training_profiles.py`
+  - Qwen2.x-VL defaults now prefer `use_fused_kernels=0`, actor/ref compile off, and a lower rollout reservation (`0.45`) unless the user overrides them
+- Verification still green after the code changes so far:
+  - local unit tests pass
+  - `python3 -m compileall src scripts tests` passes
+  - `bash -n scripts/train_grpo_active_vision.sh` passes
+- Real benchmark reruns are currently blocked again by live GPU contention outside this training job:
+  - a separate `vllm serve` process is holding about `37 GiB` on each GPU
+  - no additional benchmark/train runs should be started until that process is cleared or the launcher is redirected to uncontended GPUs
 - Added `src/active_perception_r1/rollout/zoom_runtime.py` to centralize zoom execution, nested-view bbox composition, crop generation, observation messages, and explicit tool failure states.
 - Added `configs/agent_loop/active_perception_zoom_agent.yaml` and wired `scripts/train_grpo_active_vision.sh` to enable multi-turn rollout with the new agent loop.
 - Extended `src/active_perception_r1/rewards/active_vision_reward.py` so executed tool traces take precedence over parse-only reconstruction when rollout metadata is available.

@@ -13,9 +13,14 @@ outputs/
 checkpoints/
 data/
 .vendor/
+.vendor_runtime/
 .pip-cache/
 .vendor_train/
 .tmp/
+.t/
+.r/
+.ray_tmp/
+.prepared_data/
 reports/grpo_smoke_run*.log
 reports/*seed*.log
 reports/active_benchmark/benchmark-*.json

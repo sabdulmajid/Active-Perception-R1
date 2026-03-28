@@ -12,6 +12,7 @@ from active_perception_r1.rollout.zoom_runtime import (
     zoom_limit_trace,
 )
 from active_perception_r1.utils.trace_parser import parse_reasoning_trace
+from active_perception_r1.utils.multimodal_messages import strip_none_fields_from_messages
 
 from verl.experimental.agent_loop.agent_loop import AgentLoopOutput, register
 from verl.experimental.agent_loop.tool_agent_loop import AgentData, AgentState, ToolAgentLoop
@@ -51,7 +52,7 @@ class ActivePerceptionZoomAgentLoop(ToolAgentLoop):
         self.tool_schemas = []
 
     async def run(self, sampling_params: dict[str, Any], **kwargs) -> AgentLoopOutput:
-        messages = copy.deepcopy(list(kwargs["raw_prompt"]))
+        messages = strip_none_fields_from_messages(copy.deepcopy(list(kwargs["raw_prompt"])))
         multi_modal_data = await self.process_vision_info(messages)
         images = multi_modal_data.get("images") or []
         videos = multi_modal_data.get("videos")

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
 from typing import Any
 
 from active_perception_r1.envs.zoom_simulator import SimulatedZoomEnvironment
@@ -32,17 +31,41 @@ def extract_final_answer(solution_str: str) -> str:
     return non_empty_lines[-1] if non_empty_lines else ""
 
 
-@dataclass(frozen=True)
 class RewardWeights:
-    outcome_correct: float = 1.0
-    outcome_incorrect: float = 0.0
-    process_reward_scale: float = 0.35
-    valid_zoom_bonus: float = 0.10
-    malformed_zoom_penalty: float = -0.20
-    out_of_bounds_penalty: float = -0.20
-    missing_zoom_penalty: float = -0.15
-    random_zoom_penalty: float = -0.10
-    overscan_penalty: float = -0.08
+    __slots__ = (
+        "outcome_correct",
+        "outcome_incorrect",
+        "process_reward_scale",
+        "valid_zoom_bonus",
+        "malformed_zoom_penalty",
+        "out_of_bounds_penalty",
+        "missing_zoom_penalty",
+        "random_zoom_penalty",
+        "overscan_penalty",
+    )
+
+    def __init__(
+        self,
+        *,
+        outcome_correct: float = 1.0,
+        outcome_incorrect: float = 0.0,
+        process_reward_scale: float = 0.35,
+        valid_zoom_bonus: float = 0.10,
+        malformed_zoom_penalty: float = -0.20,
+        out_of_bounds_penalty: float = -0.20,
+        missing_zoom_penalty: float = -0.15,
+        random_zoom_penalty: float = -0.10,
+        overscan_penalty: float = -0.08,
+    ) -> None:
+        self.outcome_correct = float(outcome_correct)
+        self.outcome_incorrect = float(outcome_incorrect)
+        self.process_reward_scale = float(process_reward_scale)
+        self.valid_zoom_bonus = float(valid_zoom_bonus)
+        self.malformed_zoom_penalty = float(malformed_zoom_penalty)
+        self.out_of_bounds_penalty = float(out_of_bounds_penalty)
+        self.missing_zoom_penalty = float(missing_zoom_penalty)
+        self.random_zoom_penalty = float(random_zoom_penalty)
+        self.overscan_penalty = float(overscan_penalty)
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:

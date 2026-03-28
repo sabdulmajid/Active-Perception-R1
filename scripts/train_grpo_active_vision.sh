@@ -8,16 +8,41 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PYTHONPATH="${REPO_ROOT}/src:${PYTHONPATH:-}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
+export RAY_TMPDIR="${RAY_TMPDIR:-${REPO_ROOT}/.r}"
+export TMPDIR="${TMPDIR:-${REPO_ROOT}/.t}"
+export VLLM_USE_NCCL_SYMM_MEM="${VLLM_USE_NCCL_SYMM_MEM:-0}"
+export TVM_FFI_DISABLE_TORCH_C_DLPACK="${TVM_FFI_DISABLE_TORCH_C_DLPACK:-1}"
+
+mkdir -p "${RAY_TMPDIR}" "${TMPDIR}"
+
+eval "$(
+  python3 -m active_perception_r1.utils.python_dev_headers \
+    --repo-root "${REPO_ROOT}" \
+    --format exports
+)"
+
+if [[ "${ACTIVE_PERCEPTION_PYTHON_INCLUDE_SOURCE}" != "system" ]]; then
+  export CPATH="${ACTIVE_PERCEPTION_PYTHON_COMPILER_INCLUDE_DIRS}${CPATH:+:${CPATH}}"
+  export C_INCLUDE_PATH="${ACTIVE_PERCEPTION_PYTHON_COMPILER_INCLUDE_DIRS}${C_INCLUDE_PATH:+:${C_INCLUDE_PATH}}"
+  export CPLUS_INCLUDE_PATH="${ACTIVE_PERCEPTION_PYTHON_COMPILER_INCLUDE_DIRS}${CPLUS_INCLUDE_PATH:+:${CPLUS_INCLUDE_PATH}}"
+fi
 
 ENGINE="${ENGINE:-vllm}"
 MODEL_PATH="${MODEL_PATH:-Qwen/Qwen2.5-VL-7B-Instruct}"
 TRAIN_FILE="${TRAIN_FILE:-${REPO_ROOT}/data/active_vision/train.parquet}"
 VAL_FILE="${VAL_FILE:-${REPO_ROOT}/data/active_vision/val.parquet}"
+PREPARED_DATA_DIR="${PREPARED_DATA_DIR:-${REPO_ROOT}/.prepared_data/active_vision}"
 CHECKPOINT_DIR="${CHECKPOINT_DIR:-${REPO_ROOT}/checkpoints/active_vision_grpo}"
 PROJECT_NAME="${PROJECT_NAME:-Active-Perception-R1}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-qwen25vl7b_grpo_active_vision}"
 REWARD_MODULE="${REWARD_MODULE:-${REPO_ROOT}/src/active_perception_r1/rewards/active_vision_reward.py}"
 AGENT_LOOP_CONFIG_PATH="${AGENT_LOOP_CONFIG_PATH:-${REPO_ROOT}/configs/agent_loop/active_perception_zoom_agent.yaml}"
+
+eval "$(
+  python3 -m active_perception_r1.utils.training_profiles \
+    --model-path "${MODEL_PATH}" \
+    --format exports
+)"
 
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
 VAL_BATCH_SIZE="${VAL_BATCH_SIZE:-16}"
@@ -27,9 +52,17 @@ N_RESPONSES="${N_RESPONSES:-4}"
 IMAGE_KEY="${IMAGE_KEY:-images}"
 PPO_MINI_BATCH_SIZE="${PPO_MINI_BATCH_SIZE:-32}"
 PPO_MICRO_BATCH_SIZE_PER_GPU="${PPO_MICRO_BATCH_SIZE_PER_GPU:-1}"
+ACTOR_USE_DYNAMIC_BSZ="${ACTOR_USE_DYNAMIC_BSZ:-0}"
 ACTOR_MAX_TOKEN_LEN_PER_GPU="${ACTOR_MAX_TOKEN_LEN_PER_GPU:-8192}"
 LOGPROB_MAX_TOKEN_LEN_PER_GPU="${LOGPROB_MAX_TOKEN_LEN_PER_GPU:-12288}"
-ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.55}"
+LOGPROB_USE_DYNAMIC_BSZ="${LOGPROB_USE_DYNAMIC_BSZ:-${ACTOR_USE_DYNAMIC_BSZ}}"
+LOGPROB_MICRO_BATCH_SIZE_PER_GPU="${LOGPROB_MICRO_BATCH_SIZE_PER_GPU:-1}"
+USE_FUSED_KERNELS="${USE_FUSED_KERNELS:-${ACTIVE_PERCEPTION_DEFAULT_USE_FUSED_KERNELS}}"
+ACTOR_USE_TORCH_COMPILE="${ACTOR_USE_TORCH_COMPILE:-${ACTIVE_PERCEPTION_DEFAULT_ACTOR_USE_TORCH_COMPILE}}"
+ACTOR_FSDP_USE_TORCH_COMPILE="${ACTOR_FSDP_USE_TORCH_COMPILE:-${ACTIVE_PERCEPTION_DEFAULT_ACTOR_FSDP_USE_TORCH_COMPILE}}"
+REF_USE_TORCH_COMPILE="${REF_USE_TORCH_COMPILE:-${ACTIVE_PERCEPTION_DEFAULT_REF_USE_TORCH_COMPILE}}"
+REF_FSDP_USE_TORCH_COMPILE="${REF_FSDP_USE_TORCH_COMPILE:-${ACTIVE_PERCEPTION_DEFAULT_REF_FSDP_USE_TORCH_COMPILE}}"
+ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-${ACTIVE_PERCEPTION_DEFAULT_ROLLOUT_GPU_MEMORY_UTILIZATION}}"
 ROLLOUT_TP_SIZE="${ROLLOUT_TP_SIZE:-1}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-4096}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-8}"
@@ -59,6 +92,7 @@ PREFLIGHT_ARGS=(
   --required-gpus "${N_GPUS_PER_NODE}"
   --modules "torch,torchaudio,torchvision,transformers,verl,vllm,pybase64,ray,accelerate,gguf"
   --install-hint "pip install -e .[train]"
+  --require-python-dev-headers
 )
 
 if [[ "${ALLOW_BUSY_GPU}" == "1" ]]; then
@@ -67,9 +101,21 @@ fi
 
 python3 -m active_perception_r1.utils.preflight "${PREFLIGHT_ARGS[@]}"
 
+PREPARED_TRAIN_FILE="$(
+  python3 -m active_perception_r1.utils.agent_loop_dataset \
+    --input "${TRAIN_FILE}" \
+    --output-dir "${PREPARED_DATA_DIR}"
+)"
+
+PREPARED_VAL_FILE="$(
+  python3 -m active_perception_r1.utils.agent_loop_dataset \
+    --input "${VAL_FILE}" \
+    --output-dir "${PREPARED_DATA_DIR}"
+)"
+
 RESOLVED_IMAGE_KEY="$(
   python3 -m active_perception_r1.utils.dataset_schema \
-    --parquet-path "${TRAIN_FILE}" \
+    --parquet-path "${PREPARED_TRAIN_FILE}" \
     --prompt-key "prompt" \
     --requested-image-key "${IMAGE_KEY}"
 )"
@@ -80,8 +126,8 @@ python3 -m verl.trainer.main_ppo \
   algorithm.kl_penalty=low_var_kl \
   algorithm.kl_ctrl.type=fixed \
   algorithm.kl_ctrl.kl_coef="${KL_COEF}" \
-  data.train_files="${TRAIN_FILE}" \
-  data.val_files="${VAL_FILE}" \
+  data.train_files="${PREPARED_TRAIN_FILE}" \
+  data.val_files="${PREPARED_VAL_FILE}" \
   data.prompt_key=prompt \
   data.reward_fn_key=data_source \
   data.train_batch_size="${TRAIN_BATCH_SIZE}" \
@@ -94,7 +140,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
   +actor_rollout_ref.model.override_config.attn_implementation="${ATTN_IMPLEMENTATION}" \
   actor_rollout_ref.model.use_remove_padding=True \
-  actor_rollout_ref.model.use_fused_kernels=True \
+  actor_rollout_ref.model.use_fused_kernels="${USE_FUSED_KERNELS}" \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
   actor_rollout_ref.actor.optim.lr=1e-6 \
   actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
@@ -105,16 +151,22 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.grad_clip=1.0 \
   actor_rollout_ref.actor.entropy_coeff=0 \
   actor_rollout_ref.actor.use_kl_loss=False \
-  actor_rollout_ref.actor.use_dynamic_bsz=True \
+  actor_rollout_ref.actor.use_torch_compile="${ACTOR_USE_TORCH_COMPILE}" \
+  actor_rollout_ref.actor.use_dynamic_bsz="${ACTOR_USE_DYNAMIC_BSZ}" \
   actor_rollout_ref.actor.ppo_max_token_len_per_gpu="${ACTOR_MAX_TOKEN_LEN_PER_GPU}" \
   actor_rollout_ref.actor.fsdp_config.param_offload=False \
   actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
-  actor_rollout_ref.ref.log_prob_use_dynamic_bsz=True \
+  actor_rollout_ref.actor.fsdp_config.use_torch_compile="${ACTOR_FSDP_USE_TORCH_COMPILE}" \
+  actor_rollout_ref.ref.use_torch_compile="${REF_USE_TORCH_COMPILE}" \
+  actor_rollout_ref.ref.log_prob_use_dynamic_bsz="${LOGPROB_USE_DYNAMIC_BSZ}" \
+  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu="${LOGPROB_MICRO_BATCH_SIZE_PER_GPU}" \
   actor_rollout_ref.ref.log_prob_max_token_len_per_gpu="${LOGPROB_MAX_TOKEN_LEN_PER_GPU}" \
   actor_rollout_ref.ref.fsdp_config.param_offload=True \
+  actor_rollout_ref.ref.fsdp_config.use_torch_compile="${REF_FSDP_USE_TORCH_COMPILE}" \
   actor_rollout_ref.rollout.name="${ENGINE}" \
   actor_rollout_ref.rollout.tensor_model_parallel_size="${ROLLOUT_TP_SIZE}" \
-  actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=True \
+  actor_rollout_ref.rollout.log_prob_use_dynamic_bsz="${LOGPROB_USE_DYNAMIC_BSZ}" \
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu="${LOGPROB_MICRO_BATCH_SIZE_PER_GPU}" \
   actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu="${LOGPROB_MAX_TOKEN_LEN_PER_GPU}" \
   actor_rollout_ref.rollout.gpu_memory_utilization="${ROLLOUT_GPU_MEMORY_UTILIZATION}" \
   actor_rollout_ref.rollout.max_num_batched_tokens="${MAX_NUM_BATCHED_TOKENS}" \
@@ -136,6 +188,7 @@ python3 -m verl.trainer.main_ppo \
   +reward.custom_reward_function.reward_kwargs.max_zoom_calls="${MAX_ZOOM_CALLS}" \
   +reward.custom_reward_function.reward_kwargs.min_relative_area="${MIN_RELATIVE_AREA}" \
   +reward.custom_reward_function.reward_kwargs.max_relative_area="${MAX_RELATIVE_AREA}" \
+  +ray_kwargs.ray_init.include_dashboard=False \
   trainer.use_legacy_worker_impl=disable \
   trainer.logger="${LOGGER}" \
   trainer.project_name="${PROJECT_NAME}" \
